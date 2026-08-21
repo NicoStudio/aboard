@@ -76,7 +76,7 @@ Then verify that:
 
 `./scripts/verify.sh` checks JavaScript syntax and the plugin manifest. `./scripts/verify.sh --installed` additionally runs installed-window, hover/drag safety, type-guard, and feature tests when Aboard is running.
 
-The last verified injection version is **63**. The plugin cachebuster changes independently in `.codex-plugin/plugin.json`.
+The last verified injection version is **64**. The plugin cachebuster changes independently in `.codex-plugin/plugin.json`.
 
 ## Continuing work
 

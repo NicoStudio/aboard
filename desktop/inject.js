@@ -3,7 +3,7 @@
 
   const ACTIVE_HANDOFF_BINDING = __ABOARD_HANDOFF_BINDING__;
   window.__conversationDashboardBindingName = ACTIVE_HANDOFF_BINDING;
-  const INJECTION_VERSION = 63;
+  const INJECTION_VERSION = 64;
   if (window.__conversationDashboardInstalled) {
     if (window.__conversationDashboardVersion === INJECTION_VERSION) return;
     window.__conversationDashboardCleanup?.();
@@ -76,6 +76,10 @@
   let metadataDebounceTimer = null;
   let runtimeStatusRequestInFlight = false;
   let nativeRefreshFrame = null;
+  let recentHydrationPromise = null;
+  let recentHydrationButton = null;
+  let recentHydrationCacheSize = -1;
+  let recentHydrationAttempts = 0;
   let pointerCandidate = null;
   let childPointerController = null;
   let lastHandoffSignature = "";
@@ -1136,6 +1140,7 @@
   }
 
   function postNativeMetadata() {
+    if (active) void hydrateRecentThreads();
     const frame = document.querySelector(`#${SURFACE_ID} iframe`);
     const payload = nativeThreadMetadata();
     const signature = JSON.stringify(payload.map(entry => [entry.id, entry.title, entry.createdAt, entry.updatedAt, entry.runtimeStatus]));
@@ -1202,10 +1207,98 @@
     }) || null;
   }
 
-  async function ensureThreadRowsVisible() {
-    if (allThreadRows().length) return allThreadRows();
+  function recentThreadRows() {
+    return [...document.querySelectorAll(CHAT_THREAD_SELECTOR)];
+  }
+
+  function nativeSidebarScrollContainer(recents = recentThreadsButton()) {
+    const aside = document.querySelector("aside");
+    if (!aside || !recents) return null;
+    return [aside, ...aside.querySelectorAll("*")].find(element =>
+      element.contains?.(recents)
+      && element.clientHeight > 100
+      && element.scrollHeight > element.clientHeight + 8
+    ) || null;
+  }
+
+  function afterAnimationFrames(count = 1) {
+    return new Promise(resolve => {
+      const next = remaining => {
+        if (remaining <= 0) { resolve(); return; }
+        requestAnimationFrame(() => next(remaining - 1));
+      };
+      next(count);
+    });
+  }
+
+  async function hydrateRecentThreads({ force = false } = {}) {
+    if (recentHydrationPromise) return recentHydrationPromise;
     const recents = recentThreadsButton();
-    if (recents && recents.getAttribute("aria-expanded") !== "true") recents.click();
+    if (!recents) return recentThreadRows();
+    const cacheSize = conversationCache().size;
+    const currentRows = recentThreadRows().length;
+    const newSidebar = recents !== recentHydrationButton;
+    const cacheGrew = recentHydrationCacheSize >= 0 && cacheSize > recentHydrationCacheSize;
+    const collapsed = recents.getAttribute("aria-expanded") !== "true";
+    if (newSidebar || cacheGrew) recentHydrationAttempts = 0;
+    const partialRetry = !collapsed && currentRows < 10 && recentHydrationAttempts < 3;
+    const shouldExpand = collapsed && (force || newSidebar || cacheGrew);
+    if (!cacheGrew && !partialRetry && !shouldExpand) {
+      recentHydrationButton = recents;
+      recentHydrationCacheSize = Math.max(recentHydrationCacheSize, cacheSize);
+      return recentThreadRows();
+    }
+
+    recentHydrationPromise = (async () => {
+      recentHydrationAttempts += 1;
+      if (shouldExpand) {
+        recents.click();
+        await waitFor(() => recents.getAttribute("aria-expanded") === "true", 800);
+      }
+
+      const scroller = nativeSidebarScrollContainer(recents);
+      if (!scroller || listenerController.signal.aborted) return recentThreadRows();
+      const originalScrollTop = scroller.scrollTop;
+      const originalScrollBehavior = scroller.style.scrollBehavior;
+      const originalOverflowAnchor = scroller.style.overflowAnchor;
+      const beforeCount = recentThreadRows().length;
+      const beforeHeight = scroller.scrollHeight;
+      let userInteracted = false;
+      const markUserInteraction = () => { userInteracted = true; };
+      const interactionEvents = ["wheel", "pointerdown", "touchstart", "keydown"];
+      interactionEvents.forEach(type => scroller.addEventListener(type, markUserInteraction, { capture: true, once: true }));
+      try {
+        scroller.style.scrollBehavior = "auto";
+        scroller.style.overflowAnchor = "none";
+        const bottom = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        if (bottom > 0) {
+          scroller.scrollTop = bottom;
+          await waitFor(() =>
+            recentThreadRows().length > beforeCount || scroller.scrollHeight > beforeHeight,
+          300);
+          await afterAnimationFrames(2);
+          if (!userInteracted) {
+            scroller.scrollTop = Math.min(originalScrollTop, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
+            await afterAnimationFrames(1);
+          }
+        }
+      } finally {
+        interactionEvents.forEach(type => scroller.removeEventListener(type, markUserInteraction, { capture: true }));
+        scroller.style.scrollBehavior = originalScrollBehavior;
+        scroller.style.overflowAnchor = originalOverflowAnchor;
+      }
+      return recentThreadRows();
+    })().finally(() => {
+      recentHydrationButton = recents.isConnected === false ? null : recents;
+      recentHydrationCacheSize = Math.max(recentHydrationCacheSize, cacheSize);
+      recentHydrationPromise = null;
+    });
+    return recentHydrationPromise;
+  }
+
+  async function ensureThreadRowsVisible() {
+    await hydrateRecentThreads({ force: true });
+    if (allThreadRows().length) return allThreadRows();
     await waitFor(() => allThreadRows().length ? allThreadRows() : null, 3_000);
     return allThreadRows();
   }
@@ -1732,6 +1825,7 @@
       delete window.__aboardStartupNeutralHandled;
       if (!startupNeutralHandled) requestNeutralHostRoute();
     }
+    const firstActivation = !active;
     hideReturnControl();
     active = true;
     syncSurfaceBounds(surface, previousMain);
@@ -1746,6 +1840,7 @@
       previousMain.style.visibility = "hidden";
       previousMain.setAttribute("aria-hidden", "true");
     }
+    if (firstActivation) void hydrateRecentThreads({ force: true });
     setTimeout(postNativeMetadata, 80);
     clearInterval(metadataPollTimer);
     metadataPollTimer = setInterval(postNativeMetadata, 1_500);

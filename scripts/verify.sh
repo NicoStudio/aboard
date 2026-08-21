@@ -40,6 +40,7 @@ HANDOFF_INJECTION_VERSION="$(python3 -c 'import re,sys; text=open(sys.argv[1]).r
 "$NODE_BIN" "$REPO_ROOT/desktop/test-installer-safety.mjs"
 "$NODE_BIN" "$REPO_ROOT/desktop/test-launcher-race.mjs"
 "$NODE_BIN" "$REPO_ROOT/desktop/test-runtime-progress.mjs"
+"$NODE_BIN" "$REPO_ROOT/desktop/test-recents-hydration.mjs"
 "$NODE_BIN" "$REPO_ROOT/desktop/test-create-conversation-lifecycle.mjs"
 "$NODE_BIN" --input-type=module -e "import {readFileSync} from 'node:fs'; const html=readFileSync(process.argv[1],'utf8'); const scripts=[...html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/g)].map(match=>match[1]); new Function(scripts.at(-1));" "$REPO_ROOT/web/dashboard.html"
 python3 -m json.tool "$REPO_ROOT/.codex-plugin/plugin.json" >/dev/null

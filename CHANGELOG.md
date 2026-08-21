@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 — 2026-08-21
+
+- Preloads the native Recents virtual list once when Aboard opens, so cached conversations appear immediately instead of mounting a few rows at a time.
+- Expands Recents before treating unrelated Work rows as proof that the native sidebar is ready.
+- Restores the user's exact sidebar scroll position and does not issue any additional conversation API request.
+- Repeats the local preload only when the native sidebar is replaced or its cached conversation set grows.
+
 ## 1.0.1 — 2026-08-21
 
 - Rewrote the public guide around a three-step installation for ordinary Mac users.

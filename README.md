@@ -7,7 +7,7 @@
 <p align="center"><strong>把散落在 ChatGPT 和 Codex 里的对话，整理成一张看板。</strong></p>
 
 <p align="center">
-  <a href="https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.1.zip"><strong>下载最新版</strong></a>
+  <a href="https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.2.zip"><strong>下载最新版</strong></a>
   ·
   <a href="https://github.com/NicoStudio/aboard/releases/latest">查看更新</a>
 </p>
@@ -35,7 +35,7 @@ Aboard 是一款 macOS 应用：左边整理 Chat，右边按项目整理 Work�
 
 然后：
 
-1. [下载 Aboard 安装包](https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.1.zip)。
+1. [下载 Aboard 安装包](https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.2.zip)。
 2. 双击下载的 ZIP，打开解压得到的 **Aboard** 文件夹。
 3. 双击 **Install Aboard.command**，看到“安装完成”即可。
 

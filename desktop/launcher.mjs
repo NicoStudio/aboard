@@ -203,7 +203,7 @@ async function withOfficialCodexAppServer(operation) {
   });
   try {
     await request("initialize", {
-      clientInfo: { name: "aboard", version: "1.0.1" },
+      clientInfo: { name: "aboard", version: "1.0.2" },
       capabilities: { experimentalApi: true }
     });
     return await operation(request);
