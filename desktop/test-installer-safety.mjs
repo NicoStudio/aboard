@@ -8,13 +8,28 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const [installer, verifier, boardStorage, installedProbe, installedTestSupervisor] = await Promise.all([
+const [installer, friendlyInstaller, verifier, boardStorage, installedProbe, installedTestSupervisor] = await Promise.all([
   readFile(path.join(repoRoot, "scripts", "install-on-mac.sh"), "utf8"),
+  readFile(path.join(repoRoot, "Install Aboard.command"), "utf8"),
   readFile(path.join(repoRoot, "scripts", "verify.sh"), "utf8"),
   readFile(path.join(repoRoot, "desktop", "board-storage.mjs"), "utf8"),
   readFile(path.join(repoRoot, "desktop", "verify-installed.mjs"), "utf8"),
   readFile(path.join(repoRoot, "scripts", "installed-test-supervisor.py"), "utf8")
 ]);
+
+assert.match(friendlyInstaller, /Aboard 一键安装 \/ Easy Installer/,
+  "the double-click installer must identify itself in plain language");
+assert.match(friendlyInstaller, /if \.\/scripts\/install-on-mac\.sh; then[\s\S]*else[\s\S]*install_status=\$\?/,
+  "the friendly installer must preserve and report the real installation status");
+assert.match(friendlyInstaller, /Aboard 安装完成/,
+  "successful installation must end with a clear user-facing message");
+assert.match(friendlyInstaller, /Aboard 安装失败/,
+  "failed installation must end with a clear user-facing message");
+assert.match(friendlyInstaller, /\[\[ -t 0 \]\][\s\S]*read -k 1/,
+  "the installer may pause only when showing an interactive failure");
+for (const stage of ["1/4", "2/4", "3/4", "4/4"]) {
+  assert.ok(installer.includes(stage), `the installer must expose progress stage ${stage}`);
+}
 
 const appVerification = installer.indexOf('"$NODE_BIN" "$REPO_ROOT/desktop/verify-installed.mjs"');
 const pluginUpdate = installer.indexOf('"$CODEX_BIN" plugin add conversation-dashboard@personal');

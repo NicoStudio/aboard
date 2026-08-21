@@ -1,29 +1,25 @@
-# Aboard 1.0.0
+# Aboard 1.0.1
 
-Aboard 1.0.0 is the first stable macOS release of the visual ChatGPT/Codex conversation board.
+这次更新让 Aboard 更容易理解和安装。
 
-## Highlights
+## 有什么变化？
 
-- Organize cloud Chat conversations into Professional and Personal.
-- Organize local Codex Work into compact, reorderable project cards.
-- Drag conversations directly from the native sidebar.
-- See running/waiting states and context-use progress.
-- Hide individual titles, set priorities, pin important items and follow the host theme.
-- Open the original local or cloud conversation inside Aboard and return to the board.
-- Create Chat or Work from its final Aboard destination, continue the native conversation without an automatic return, and let Aboard file it once the real conversation ID and title are ready.
-- Protect local Work from cross-window writer conflicts while allowing Aboard to reopen a task already owned by its own runtime.
-- Reliably return to the board even after the native host sidebar or workspace rerenders.
+- GitHub 首页改为普通用户说明，不再一上来展示开发细节。
+- 安装步骤缩短为：下载、解压、双击安装器。
+- 安装器增加清晰进度、中文提示和成功/失败弹窗。
+- 技术架构、数据位置、备份和开发说明移到独立文档。
+- 安装与更新仍会保留原有看板数据。
 
-## Installation
+## 安装
 
-Download `Aboard-macOS-1.0.0.zip`, extract it and double-click `Install Aboard.command`.
+1. 下载 `Aboard-macOS-1.0.1.zip`。
+2. 解压后打开 **Aboard** 文件夹。
+3. 双击 **Install Aboard.command**。
 
-The installer requires Python 3 and the official ChatGPT/Codex macOS app in `/Applications/ChatGPT.app`. It builds Aboard locally and does not redistribute or modify the OpenAI-signed runtime.
+如果 macOS 阻止打开，请按住 Control 点击安装器，选择“打开”。
 
-## Privacy
+安装前需要官方 ChatGPT/Codex macOS 应用和 Python 3。
 
-The archive contains an empty default board, synthetic tests and a synthetic screenshot. It contains no user board, project name, conversation title, conversation ID, log, cache, database or machine-specific absolute path.
+## 隐私
 
-## Distribution note
-
-The Aboard shell is built locally with an ad-hoc signature. This is not a Developer ID notarized binary distribution. The official ChatGPT runtime keeps its original OpenAI signature.
+发布包只有空白看板和合成演示数据，不包含用户项目、真实标题、会话 ID、日志、缓存、数据库或本机路径。

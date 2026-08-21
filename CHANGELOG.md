@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 — 2026-08-21
+
+- Rewrote the public guide around a three-step installation for ordinary Mac users.
+- Added a bilingual double-click installer with prerequisite checks, visible progress and clear success or recovery messages.
+- Moved architecture, storage, backup and developer details into a separate technical guide.
+- Kept the existing Aboard data model and local board data unchanged during the update.
+
 ## 1.0.0 — 2026-08-21
 
 First stable release.

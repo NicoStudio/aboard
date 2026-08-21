@@ -1,162 +1,93 @@
 # Aboard
 
 <p align="center">
-  <img src="assets/Aboard.png" width="128" height="128" alt="Aboard app icon">
+  <img src="assets/Aboard.png" width="112" height="112" alt="Aboard app icon">
 </p>
 
-<p align="center"><strong>把散落在 ChatGPT 与 Codex 里的对话，整理成一张真正可操作的看板。</strong></p>
+<p align="center"><strong>把散落在 ChatGPT 和 Codex 里的对话，整理成一张看板。</strong></p>
 
 <p align="center">
-  macOS 12+ · Chat + Work · 拖拽归类 · 深色模式 · 本地优先
+  <a href="https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.1.zip"><strong>下载最新版</strong></a>
+  ·
+  <a href="https://github.com/NicoStudio/aboard/releases/latest">查看更新</a>
 </p>
 
-Aboard 是 ChatGPT/Codex macOS 客户端的可视化会话看板。它把云端 Chat 分为专业与个人两个区域，把本地 Codex Work 按项目组织成紧凑卡片，并保留原生会话作为唯一数据源。
-
-> Aboard 是独立社区项目，不是 OpenAI 官方产品。它不会把 ChatGPT/Codex 应用、账号凭据或你的会话内容打包进仓库。
+Aboard 是一款 macOS 应用：左边整理 Chat，右边按项目整理 Work。它不复制对话内容，只帮你更快找到、归类和打开原来的会话。
 
 ![Aboard demo with synthetic conversations](docs/aboard-demo.png)
 
-## 功能
+## 它能做什么？
 
-- **统一整理 Chat 与 Work**：云端 Chat 使用专业/个人标签，本地 Work 使用项目卡片。
-- **原生拖拽**：从客户端左侧会话列表直接拖入 Aboard，也可在看板内排序、跨项目移动。
-- **紧凑项目布局**：不同高度的项目卡片按列紧凑排列，并支持拖到指定列与指定位置。
-- **直接打开原会话**：点击条目后在 Aboard 窗口中进入对应本地或云端会话，左上角可返回看板。
-- **运行状态**：显示正在运行、等待确认、等待输入和空闲状态；本地 Work 可显示上下文使用进度。
-- **隐私显示**：每条会话可单独隐藏标题，隐藏后标题不会出现在可见 DOM 中。
-- **优先级与置顶**：支持 P0/P1/P2、按区域置顶以及多种排序方式。
-- **跟随系统主题**：与 ChatGPT/Codex 的明暗主题实时同步。
-- **安全的单写入保护**：已被另一客户端占用的本地任务不会被 Aboard 再次恢复，避免重复弹窗与写入冲突。
+- 把 Chat 分成“专业会话”和“个人会话”。
+- 把 Codex Work 按项目整理成卡片。
+- 直接拖拽会话，调整顺序或移动到其他项目。
+- 显示正在运行、等待确认和上下文使用进度。
+- 点击条目进入原会话，再从左上角返回看板。
+- 隐藏敏感标题、设置优先级、置顶重要会话。
+- 自动跟随 ChatGPT/Codex 的浅色或深色主题。
 
-## 安装要求
+## 三步安装
 
-- macOS 12 Monterey 或更高版本
-- 已安装并登录官方 [ChatGPT/Codex macOS 客户端](https://openai.com/chatgpt/desktop/)
-- 官方应用位于 `/Applications/ChatGPT.app`
-- 已安装 Python 3（安装器和本地 MCP 服务需要）
-- 安装时需要当前 macOS 用户对 `/Applications` 的写入权限
+安装前请确认：
 
-Aboard 不复制、不修改、也不重新签名官方 ChatGPT 运行时。安装器只创建一个轻量 Aboard 外壳，并在启动时校验官方应用的 Bundle ID、Developer ID Team 和签名完整性。
+- Mac 已安装并登录官方 [ChatGPT/Codex 应用](https://openai.com/chatgpt/desktop/)。
+- Mac 已安装 [Python 3](https://www.python.org/downloads/macos/)。
 
-## 安装
+然后：
 
-### 图形方式
+1. [下载 Aboard 安装包](https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.1.zip)。
+2. 双击下载的 ZIP，打开解压得到的 **Aboard** 文件夹。
+3. 双击 **Install Aboard.command**，看到“安装完成”即可。
 
-1. 下载 GitHub Release 中的 `Aboard-macOS-<版本>.zip` 并解压。
-2. 打开解压后的文件夹。
-3. 双击 **Install Aboard.command**。
-4. 安装完成后，从“应用程序”或程序坞打开 Aboard。
-5. 如果安装器提示插件已更新，请完整退出并重新打开一次 ChatGPT/Codex。
+安装器会自动打开 Aboard。以后可以从“应用程序”或程序坞启动它。
 
-### 终端方式
+> 如果 macOS 阻止打开安装器：按住 Control 点击 **Install Aboard.command**，选择“打开”，再确认一次。这通常只在第一次安装时出现。
 
-```bash
-git clone https://github.com/NicoStudio/aboard.git
-cd aboard
-./scripts/install-on-mac.sh
-```
+## 第一次使用
 
-如果旧版 Aboard 正在运行且能正常读取，安装器会先为 **Desktop 看板**创建权限为 `0600` 的私有备份；Aboard 未运行时不会创建这份自动备份。安装器不会删除或主动重置原有资料目录。随后安装器构建临时应用、验证签名与运行状态，再原子替换 `/Applications/Aboard.app`。如果在应用替换或验证阶段失败，会恢复上一版应用。
-
-新应用验证通过后，应用更新即视为已完成，之后的 Codex 插件刷新是独立步骤。如果插件刷新被中断或失败，已验证的新版 Aboard 会保留；重新运行安装器即可安全完成插件刷新。
+1. 打开 Aboard。
+2. 从左侧会话列表把 Chat 或 Work 拖进看板。
+3. 点击会话即可继续原来的对话。
+4. 需要新对话时，直接点击目标区域里的“新建”；完成后 Aboard 会把它放回正确位置。
 
 ## 更新
 
-```bash
-git pull --ff-only
-./scripts/install-on-mac.sh
-```
+下载最新版，再双击一次 **Install Aboard.command**。原来的看板和归类不会被覆盖。
 
-更新不会覆盖本地看板。Aboard 根据打开方式使用两套独立的本地存储：
-
-- **Aboard Desktop 看板**：保存在 Aboard 隔离浏览资料目录的 `localStorage` 中，资料目录为：
-
-  ```text
-  ~/Library/Application Support/Conversation Dashboard/ChatGPT Profile
-  ```
-
-- **Codex MCP 插件看板**：默认保存在：
-
-  ```text
-  ~/.codex/plugin-data/conversation-dashboard/dashboard.json
-  ```
-
-两套看板当前不会自动合并或同步，但原始会话始终以官方 ChatGPT/Codex 客户端为准。
-
-版本遵循 SemVer：兼容 Bug 修复发布为 `1.0.1`，向后兼容的新功能发布为 `1.1.0`，需要迁移或不兼容的改动才发布为 `2.0.0`。插件版本末尾的 `+codex.<时间戳>` 仅用于刷新 Codex 缓存，不改变用户看到的版本号。
-
-## 备份与恢复
-
-`export-board.sh` 只导出 **Aboard Desktop 看板**，不导出 Codex MCP 的 `dashboard.json`。运行命令时需要先打开 Aboard；备份文件默认写到桌面，而不是项目目录：
-
-```bash
-./scripts/export-board.sh
-```
-
-恢复命令同样只作用于 Desktop 看板：
-
-```bash
-./scripts/import-board.sh "$HOME/Desktop/Aboard Backup 2026-08-20.json"
-```
-
-备份包含标题、项目归类和会话标识，不包含消息正文。请把它当作私密文件保管，**不要提交到 Git**。安装器在旧版 Aboard 正在运行且可读取时，也会在 `~/Library/Application Support/Conversation Dashboard/` 下创建 `board-before-install-*.json` Desktop 备份；这一步不备份 Codex MCP 看板。
+版本规则：小修复使用 `1.0.1`，兼容的新功能使用 `1.1.0`，不兼容的大改动才使用 `2.0.0`。
 
 ## 卸载
 
-双击 **Uninstall Aboard.command**，或运行：
+双击 **Uninstall Aboard.command**。默认只移除应用，保留看板数据，方便以后重新安装。
 
-```bash
-./scripts/uninstall-on-mac.sh
-```
+## 常见问题
 
-默认卸载会保留两套本地看板数据和本机诊断日志。脚本结束时会显示三个位置，方便日后重新安装或排查问题。如果确认不再需要任何备份并希望彻底删除，请先退出 Aboard，再由你自己将以下三个精确目录移到废纸篓（卸载脚本不会代为删除）：
+**为什么安装时会打开终端窗口？**
 
-```text
-~/Library/Application Support/Conversation Dashboard
-~/.codex/plugin-data/conversation-dashboard
-~/Library/Logs/Conversation Dashboard
-```
+Aboard 会在你的 Mac 上完成本地安装和安全检查。等待出现“安装完成”即可，不需要输入命令。
 
-## 隐私与安全
+**提示没有 Python 3 怎么办？**
 
-- 仓库和发布包只包含空白默认看板与合成测试数据。
-- 不包含真实项目名称、会话标题、会话 ID、日志、缓存、数据库或本机绝对路径。
-- Aboard 不读取或复制 macOS 钥匙串内容。
-- Aboard Desktop 的独立浏览资料位于 `~/Library/Application Support/Conversation Dashboard/ChatGPT Profile`；Codex MCP 看板默认位于 `~/.codex/plugin-data/conversation-dashboard/dashboard.json`。
-- 本机启动与诊断日志位于 `~/Library/Logs/Conversation Dashboard`，权限仅限当前 macOS 账户；日志不随源码或发布包上传。官方 ChatGPT 运行时的诊断输出可能包含操作标识，公开分享前请先检查。
-- 发布前会运行 `./scripts/privacy-check.sh`，发现疑似用户数据时构建会直接失败。
-- 当前分发方式是**从源码在本机构建**；Aboard 外壳使用本机临时签名，并非 Developer ID 公证应用。官方 ChatGPT 运行时始终保持其原始 OpenAI 签名。
+从 [Python 官网](https://www.python.org/downloads/macos/) 安装最新版，然后重新双击安装器。
 
-详见 [隐私说明](PRIVACY.md) 与 [安全架构](SECURITY.md)。
+**安装后 Codex 里还是旧版本？**
 
-## 开发
+完整退出并重新打开一次 ChatGPT/Codex。
 
-```bash
-./scripts/verify.sh
-./scripts/privacy-check.sh
-./scripts/package-release.sh
-```
+**Aboard 会上传我的对话吗？**
 
-安装后的完整回归：
+不会。发布包只有空白看板和合成演示数据；原会话仍保存在官方 ChatGPT/Codex 中。
 
-```bash
-./scripts/verify.sh --installed
-```
+**这是 OpenAI 官方产品吗？**
 
-核心目录：
+不是。Aboard 是独立社区项目，需要使用你已经安装的官方 ChatGPT/Codex macOS 应用。
 
-- `web/dashboard.html` — 看板界面和交互
-- `desktop/inject.js` — 客户端侧边栏、拖拽、主题与导航桥
-- `desktop/launcher.mjs` — Aboard 运行时注入、单实例和安全路由
-- `server/dashboard_mcp.py` — Codex 插件 UI 与本地看板读写
-- `scripts/install-on-mac.sh` — 可回滚安装器
-- `desktop/` 下的 `test-*` — 交互、数据恢复和安全回归
+## 更多信息
 
-## 已知限制
-
-- 依赖当前已安装的官方 ChatGPT/Codex macOS 客户端。
-- 官方客户端更新后，如果其签名、页面结构或路由发生变化，Aboard 可能需要同步更新。
-- 从源码构建的 Aboard 外壳没有 Apple Developer ID 公证；若需要面向大众分发的免提示安装包，需要单独配置 Developer ID 签名与 notarization。
+- [技术说明与开发指南](docs/TECHNICAL.md)
+- [隐私说明](PRIVACY.md)
+- [安全架构](SECURITY.md)
+- [参与开发](CONTRIBUTING.md)
 
 ## License
 

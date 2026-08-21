@@ -13,6 +13,8 @@ READY_STAGING_APP="/tmp/Aboard.ready.building.app"
 BOARD_BACKUP="$SUPPORT_ROOT/board-before-install-$(date +%Y%m%d-%H%M%S).json"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
+echo "1/4  检查安装环境 / Checking your Mac…"
+
 secure_existing_board_backups() {
   local support_root="$1" backup
   if [[ -e "$support_root" ]]; then
@@ -144,11 +146,14 @@ disable_legacy_apps() {
 }
 
 if [[ ! -d "$SOURCE_APP" ]]; then
-  echo "Install the ChatGPT/Codex desktop app in /Applications first." >&2
+  echo "请先把官方 ChatGPT/Codex 应用安装到“应用程序”文件夹。" >&2
+  echo "Install the official ChatGPT/Codex app in /Applications first." >&2
   exit 1
 fi
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "Python 3 is required to install and run Aboard. Install Python 3, then retry." >&2
+  echo "这台 Mac 还没有 Python 3。请从以下地址安装后重试：" >&2
+  echo "Python 3 is required. Install it, then retry:" >&2
+  echo "https://www.python.org/downloads/macos/" >&2
   exit 1
 fi
 
@@ -159,11 +164,13 @@ if [[ -z "$NODE_BIN" ]]; then
   done
 fi
 if [[ -z "$NODE_BIN" ]]; then
-  echo "Node.js is required to build Aboard." >&2
+  echo "没有找到 ChatGPT/Codex 自带的运行组件。请更新官方应用后重试。" >&2
+  echo "A required ChatGPT/Codex runtime component was not found. Update the official app, then retry." >&2
   exit 1
 fi
 
 export NODE_BIN
+echo "2/4  备份并构建 Aboard / Backing up and building…"
 secure_existing_board_backups "$SUPPORT_ROOT"
 if curl --max-time 2 -sf http://localhost:9237/json/list >/dev/null 2>&1; then
   "$NODE_BIN" "$REPO_ROOT/desktop/board-storage.mjs" backup "$BOARD_BACKUP"
@@ -253,6 +260,7 @@ if [[ -e "$LEGACY_RUNTIME_APP" ]]; then
 fi
 mv "$READY_APP" "$TARGET_APP"
 
+echo "3/4  安装并验证 / Installing and verifying…"
 "$LSREGISTER" -f "$TARGET_APP" >/dev/null 2>&1 || true
 # Historical Aboard bundles once claimed codex/http/https. LaunchServices keeps
 # the chosen handler by bundle id even after those plist keys are removed, so
@@ -272,6 +280,7 @@ trap - EXIT INT TERM
 # interrupted; rerunning the installer safely completes that independent step.
 CODEX_BIN="$SOURCE_APP/Contents/Resources/codex"
 if [[ -x "$CODEX_BIN" ]]; then
+  echo "4/4  连接 Codex 插件 / Connecting the Codex plugin…"
   MARKETPLACE="$HOME/.agents/plugins/marketplace.json"
   MARKETPLACE_ROOT="$HOME/.agents/plugins"
   MARKETPLACE_PLUGIN="$MARKETPLACE_ROOT/plugins/conversation-dashboard"
@@ -300,4 +309,5 @@ if [[ -x "$CODEX_BIN" ]]; then
     exit 1
   }
 fi
-echo "Aboard is installed. Look below Plugins in the left sidebar."
+echo "Aboard 安装完成。现在可以从“应用程序”或程序坞打开。"
+echo "Aboard is installed. Open it from Applications or the Dock."
