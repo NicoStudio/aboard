@@ -1,0 +1,27 @@
+{
+  "name": "conversation-dashboard",
+  "version": "1.0.0+codex.20260821045018",
+  "description": "A visual AI conversation board for Chat and project Work.",
+  "author": {
+    "name": "Aboard contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Aboard",
+    "shortDescription": "Your AI conversations, organized at a glance.",
+    "longDescription": "A full-screen AI conversation board with synced titles, scoped pins, P0\u2013P2 priorities, live runtime states, professional and personal Chat tabs, and sortable project Work cards.",
+    "developerName": "Aboard contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Open Aboard.",
+      "Show my AI conversation board."
+    ],
+    "brandColor": "#0B4F43"
+  },
+  "mcpServers": "./.mcp.json"
+}

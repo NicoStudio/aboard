@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- macOS Dock icons need optical breathing room inside their 1024px canvas. -->
+  <g transform="translate(102.4 102.4) scale(.8)">
+    <rect width="1024" height="1024" rx="224" fill="#0B4F43"/>
+
+    <!-- Two board regions, tilted inward around a shared baseline to imply an A. -->
+    <g transform="rotate(8 330 806)">
+      <rect x="218" y="218" width="224" height="588" rx="72" fill="#E1F1EA"/>
+    </g>
+    <g transform="rotate(-8 694 806)">
+      <rect x="582" y="374" width="224" height="432" rx="72" fill="#69BFA2"/>
+    </g>
+  </g>
+</svg>

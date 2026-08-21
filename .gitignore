@@ -1,0 +1,20 @@
+.DS_Store
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.tmp
+
+# Local user data and generated evidence must never enter Git.
+outputs/
+dist/
+coverage/
+.cache/
+assets/*candidate*
+assets/aboard-app-icon.png
+
+# Editor and OS state.
+.idea/
+.vscode/
+*.swp

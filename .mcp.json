@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "conversation-dashboard": {
+      "command": "/usr/bin/env",
+      "args": [
+        "python3",
+        "-c",
+        "import os, pathlib, runpy; app = pathlib.Path(os.environ.get('ABOARD_APP_PATH', '/Applications/Aboard.app')).expanduser(); script = app / 'Contents/Resources/dashboard/server/dashboard_mcp.py'; script.is_file() or (_ for _ in ()).throw(FileNotFoundError(f'Aboard MCP runtime not found: {script}')); runpy.run_path(str(script), run_name='__main__')"
+      ],
+      "cwd": "/"
+    }
+  }
+}
