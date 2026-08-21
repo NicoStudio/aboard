@@ -16,7 +16,8 @@ Read this file before changing Aboard on another computer.
 ## Implemented behavior
 
 - Native sidebar entry below Plugins and above Projects.
-- Clicking an Aboard item opens the corresponding original local or cloud conversation inside the Aboard window. A fixed upper-left “返回 Aboard” control returns to the board without opening a second app.
+- Clicking an Aboard item opens the corresponding original local or cloud conversation inside the current Aboard window.
+- The Aboard entry below Plugins is the only return action. It shows the board as an overlay while preserving the mounted native conversation underneath; do not add a floating return control.
 - Native Chat/Work creation from the destination where the add button was clicked.
 - Drag native sidebar conversations into the correct Aboard destination.
 - Drag Chat entries between Professional and Personal.
@@ -35,7 +36,9 @@ Never reintroduce a transparent full-frame drop catcher, force `draggable=true` 
 
 ## Single-writer rule
 
-`/Applications/Aboard.app` is a lightweight local shell that executes the untouched OpenAI-signed `/Applications/ChatGPT.app` runtime with an isolated Aboard profile; never copy, modify, or ad-hoc re-sign that runtime. The dashboard rests on the neutral `/` route. Before opening a local Work conversation inside Aboard, the launcher checks the shared Codex writer locks. A claimed task stays on the board with a clear conflict message; Aboard must never resume it. An unclaimed local task may open on `/local/<id>`, and returning to Aboard immediately navigates the hidden workspace back to `/` to release its writer. Cloud Chat opens on `/work/conversation/<id>`. Never restore `row.click()` or unguarded local routing: two app servers owning one Work task causes an active-writer retry loop and visible flashing.
+`/Applications/Aboard.app` is a lightweight local shell that executes the untouched OpenAI-signed `/Applications/ChatGPT.app` runtime with an isolated Aboard profile; never copy, modify, or ad-hoc re-sign that runtime. Cold startup confirms the neutral `/` route once before injection so a stale task is not resumed accidentally. After the user opens a conversation, returning through the Aboard entry must only cover the native page; it must not navigate to `/`, detach the task, or interrupt an active response. Selecting that same conversation simply removes the overlay with zero navigation.
+
+Before Aboard opens a different local Work conversation, the launcher checks the shared Codex writer locks. An unclaimed task may open on `/local/<id>`. A task owned by this Aboard runtime may only reuse its current route or an already-mounted native row; never dispatch a blind second resume. A task owned by another Codex process stays on the board with a clear message and is never handed off automatically. Cloud Chat opens on `/work/conversation/<id>`. Mounted-row reuse is allowed only after these checks and must confirm that the target route arrived. Two independent app servers must never write the same Work task concurrently.
 
 The plugin MCP starts from the stable installed path under `/Applications/Aboard.app/Contents/Resources/dashboard`, not from the versioned plugin cache. After the first upgrade to this architecture, fully quit and reopen ChatGPT/Codex once so existing tasks discard their old cached MCP process.
 
@@ -68,7 +71,7 @@ Then verify that:
 
 - Aboard appears below Plugins and above Projects.
 - A fresh installation starts with an empty board unless the user explicitly restores a private backup from outside the repository.
-- Clicking either an Aboard item or a native sidebar conversation opens the exact task inside Aboard and shows “返回 Aboard”.
+- Clicking either an Aboard item or a native sidebar conversation opens the exact task inside Aboard; clicking the Aboard entry below Plugins returns to the board without changing the task route.
 - Opening the same task while both apps are running produces no active-writer retry or repeated dialog.
 - A wrong-type drop shows an error and imports nothing.
 
@@ -76,7 +79,7 @@ Then verify that:
 
 `./scripts/verify.sh` checks JavaScript syntax and the plugin manifest. `./scripts/verify.sh --installed` additionally runs installed-window, hover/drag safety, type-guard, and feature tests when Aboard is running.
 
-The last verified injection version is **65**. The plugin cachebuster changes independently in `.codex-plugin/plugin.json`.
+The last verified injection version is **66**. The plugin cachebuster changes independently in `.codex-plugin/plugin.json`.
 
 ## Continuing work
 

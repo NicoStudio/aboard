@@ -1031,8 +1031,10 @@
     let lastOpenSignature = "";
     let lastOpenAt = 0;
     let liveRuntime = new Map();
+    let nativeRuntime = new Map();
     let runtimePollTimer = null;
     let lastRuntimeStatusSignature = "";
+    let lastNativeRuntimeStatusSignature = "";
     let renderedProjectColumnCount = 0;
     let projectLayoutResizeTimer = null;
 
@@ -1075,7 +1077,10 @@
     }
 
     function normalizedThreadId(url) {
-      return threadIdFromUrl(url).toLocaleLowerCase("en-US");
+      const id = threadIdFromUrl(url);
+      return /^codex:\/\/threads\//i.test(String(url || ""))
+        ? id.toLocaleLowerCase("en-US")
+        : id;
     }
 
     function matchingThreadItem(items, url, excludeId = "") {
@@ -1142,18 +1147,57 @@
       return String(item.title || "").toLocaleLowerCase("zh-CN").includes(query.toLocaleLowerCase("zh-CN"));
     }
 
+    function runtimeThreadKey(id, url = "") {
+      const value = String(id || "").trim();
+      return /^codex:\/\/threads\//i.test(String(url || "")) ? value.toLowerCase() : value;
+    }
+
+    function itemRuntimeKey(item) {
+      return runtimeThreadKey(threadIdFromUrl(item.url), item.url);
+    }
+
     function liveRuntimeEntry(item) {
-      return liveRuntime.get(threadIdFromUrl(item.url)) || null;
+      return liveRuntime.get(itemRuntimeKey(item)) || null;
+    }
+
+    function nativeRuntimeEntry(item) {
+      return nativeRuntime.get(itemRuntimeKey(item)) || null;
+    }
+
+    function mergedRuntimeEntry(item) {
+      const native = nativeRuntimeEntry(item);
+      const live = liveRuntimeEntry(item);
+      const evidence = [native, live].filter(Boolean);
+      let runtimeStatus = String(item.runtimeStatus || "idle");
+      if (evidence.length) {
+        const nativeStatus = String(native?.runtimeStatus || "idle");
+        const liveStatus = String(live?.runtimeStatus || "idle");
+        if (nativeStatus === "waitingOnApproval" || nativeStatus === "waitingOnUserInput") {
+          runtimeStatus = nativeStatus;
+        } else if (liveStatus === "waitingOnApproval" || liveStatus === "waitingOnUserInput") {
+          runtimeStatus = liveStatus;
+        } else if (nativeStatus === "active" || liveStatus === "active") {
+          runtimeStatus = "active";
+        } else {
+          runtimeStatus = "idle";
+        }
+      }
+      const liveProgress = Number(live?.progress);
+      const nativeProgress = Number(native?.progress);
+      const progress = Number.isFinite(liveProgress)
+        ? liveProgress
+        : Number.isFinite(nativeProgress) ? nativeProgress : null;
+      return { runtimeStatus, progress };
     }
 
     function itemProgress(item) {
-      const liveProgress = liveRuntimeEntry(item)?.progress;
-      const value = Number.isFinite(Number(liveProgress)) ? Number(liveProgress) : Number(item.progress || 0);
+      const mergedProgress = mergedRuntimeEntry(item).progress;
+      const value = Number.isFinite(Number(mergedProgress)) ? Number(mergedProgress) : Number(item.progress || 0);
       return Math.max(0, Math.min(100, Math.round(value)));
     }
 
     function runtimeState(item) {
-      const status = String(liveRuntimeEntry(item)?.runtimeStatus || item.runtimeStatus || "idle");
+      const status = mergedRuntimeEntry(item).runtimeStatus;
       if (status === "active") return { className: "is-running", label: "进行中", labelClass: "" };
       if (status === "waitingOnApproval") return { className: "is-waiting", label: "等待批准", labelClass: "waiting" };
       if (status === "waitingOnUserInput") return { className: "is-waiting", label: "等待输入", labelClass: "waiting" };
@@ -1539,11 +1583,23 @@
     }
 
     function syncNativeMetadata(entries) {
-      if (!Array.isArray(entries) || !entries.length) return;
-      const metadata = new Map(entries.map(entry => [entry.id, entry]));
+      if (!Array.isArray(entries)) return;
+      const metadata = new Map(entries.map(entry => [runtimeThreadKey(entry?.id, entry?.url), entry]));
+      const nextNativeRuntime = new Map(entries.flatMap(entry => {
+        const id = String(entry?.id || "").trim();
+        const runtimeStatus = String(entry?.runtimeStatus || "idle");
+        if (!id || !["active", "idle", "waitingOnApproval", "waitingOnUserInput"].includes(runtimeStatus)) return [];
+        const progressValue = Number(entry?.progress);
+        const progress = Number.isFinite(progressValue) ? Math.max(0, Math.min(100, Math.round(progressValue))) : null;
+        return [[runtimeThreadKey(id, entry?.url), { runtimeStatus, progress }]];
+      }));
+      const nativeRuntimeSignature = JSON.stringify([...nextNativeRuntime].sort(([a], [b]) => a.localeCompare(b)));
+      const nativeRuntimeChanged = nativeRuntimeSignature !== lastNativeRuntimeStatusSignature;
+      lastNativeRuntimeStatusSignature = nativeRuntimeSignature;
+      nativeRuntime = nextNativeRuntime;
       let changed = false;
       for (const item of board.items) {
-        const entry = metadata.get(threadIdFromUrl(item.url));
+        const entry = metadata.get(itemRuntimeKey(item));
         if (!entry) continue;
         for (const key of ["title", "createdAt", "updatedAt"]) {
           if (entry[key] && item[key] !== entry[key]) {
@@ -1555,6 +1611,8 @@
       if (changed) {
         render();
         save();
+      } else if (nativeRuntimeChanged) {
+        refreshRuntimeRows();
       }
     }
 
@@ -1580,7 +1638,10 @@
       const next = new Map(entries.flatMap(entry => {
         const id = String(entry?.id || "").trim().toLowerCase();
         if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(id)) return [];
-        const runtimeStatus = entry?.runtimeStatus === "active" ? "active" : "idle";
+        const requestedStatus = String(entry?.runtimeStatus || "idle");
+        const runtimeStatus = ["active", "waitingOnApproval", "waitingOnUserInput"].includes(requestedStatus)
+          ? requestedStatus
+          : "idle";
         const progressValue = Number(entry?.progress);
         const progress = Number.isFinite(progressValue) ? Math.max(0, Math.min(100, Math.round(progressValue))) : null;
         return [[id, { runtimeStatus, progress }]];
@@ -1589,6 +1650,10 @@
       if (signature === lastRuntimeStatusSignature) return;
       lastRuntimeStatusSignature = signature;
       liveRuntime = next;
+      refreshRuntimeRows();
+    }
+
+    function refreshRuntimeRows() {
       for (const item of board.items) {
         const row = document.querySelector(`[data-drag-item="${CSS.escape(item.id)}"]`);
         if (!row) continue;
@@ -1636,7 +1701,7 @@
         title: item.titleHidden ? "" : item.title,
         kind: item.kind,
         hostId: item.hostId || "",
-        runtimeStatus: String(liveRuntimeEntry(item)?.runtimeStatus || item.runtimeStatus || "idle")
+        runtimeStatus: mergedRuntimeEntry(item).runtimeStatus
       };
       if (embeddedMode) {
         window.parent.postMessage({
@@ -2552,6 +2617,11 @@
       const message = event.data;
       if (message?.method === "conversation-dashboard/theme") {
         applyTheme(message.theme);
+        return;
+      }
+      if (message?.method === "conversation-dashboard/board-activated") {
+        lastOpenSignature = "";
+        lastOpenAt = 0;
         return;
       }
       if (message?.method?.startsWith("conversation-dashboard/native-")) {

@@ -8,7 +8,7 @@ const dashboardPath = process.env.ABOARD_DASHBOARD_PATH
 const requireHostIntegration = !process.env.ABOARD_DASHBOARD_PATH;
 const dashboardTemplate = await readFile(dashboardPath, "utf8");
 const ids = {
-  chat: "33333333-3333-4333-8333-333333333333",
+  chat: "runtime-cloud-chat-Alpha_123",
   work: "44444444-4444-4444-8444-444444444444"
 };
 const fixture = {
@@ -17,7 +17,7 @@ const fixture = {
   chatSortBy: { professional: "updated", personal: "updated" },
   projects: [{ id: "runtime-project", name: "Runtime", accent: "#2F8069", order: 1, sortBy: "updated" }],
   items: [
-    { id: "runtime-chat", title: "Runtime Chat", kind: "chat", topic: "professional", projectId: null, pinned: false, marker: "p2", progress: 0, runtimeStatus: "idle", url: `codex://threads/${ids.chat}` },
+    { id: "runtime-chat", title: "Runtime Chat", kind: "chat", topic: "professional", projectId: null, pinned: false, marker: "p2", progress: 0, runtimeStatus: "idle", url: `https://chatgpt.com/c/${ids.chat}` },
     { id: "runtime-work", title: "Runtime Work", kind: "work", topic: null, projectId: "runtime-project", pinned: false, marker: "p2", progress: 0, runtimeStatus: "idle", url: `codex://threads/${ids.work}` }
   ]
 };
@@ -99,15 +99,6 @@ try {
     });
     const child = frame.contentWindow;
     const doc = frame.contentDocument;
-    child.postMessage({
-      method: "conversation-dashboard/native-runtime-status",
-      payload: [
-        { id: ${JSON.stringify(ids.chat)}, runtimeStatus: "active", progress: 50 },
-        { id: ${JSON.stringify(ids.work)}, runtimeStatus: "active", progress: 50 }
-      ]
-    }, "*");
-    const deadline = performance.now() + 1_500;
-    while (performance.now() < deadline && doc.querySelectorAll('[data-progress="50"].is-running').length !== 2) await sleep(20);
     const snapshot = id => {
       const row = doc.querySelector('[data-drag-item="' + id + '"]');
       const width = Number.parseFloat(child.getComputedStyle(row, "::before").width);
@@ -115,6 +106,7 @@ try {
       return {
         exists: Boolean(row),
         running: row?.classList.contains("is-running") || false,
+        waiting: row?.classList.contains("is-waiting") || false,
         progress: row?.dataset.progress || "",
         fillRatio: rowWidth > 0 ? width / rowWidth : 0,
         status: row?.querySelector(".runtime-status")?.textContent || "",
@@ -122,19 +114,67 @@ try {
         progressTitle: row?.querySelector(".runtime-progress")?.getAttribute("title") || ""
       };
     };
-    const active = { chat: snapshot("runtime-chat"), work: snapshot("runtime-work") };
+    child.postMessage({
+      method: "conversation-dashboard/native-metadata",
+      payload: [
+        { id: ${JSON.stringify(ids.chat)}, url: "https://chatgpt.com/c/${ids.chat}", runtimeStatus: "active" },
+        { id: ${JSON.stringify(ids.work)}, url: "codex://threads/${ids.work}", runtimeStatus: "waitingOnApproval" }
+      ]
+    }, "*");
     child.postMessage({
       method: "conversation-dashboard/native-runtime-status",
       payload: [
-        { id: ${JSON.stringify(ids.chat)}, runtimeStatus: "idle", progress: null },
-        { id: ${JSON.stringify(ids.work)}, runtimeStatus: "idle", progress: null }
+        { id: ${JSON.stringify(ids.work)}, runtimeStatus: "active", progress: 50 }
       ]
+    }, "*");
+    let deadline = performance.now() + 1_500;
+    while (performance.now() < deadline) {
+      const chat = snapshot("runtime-chat");
+      const work = snapshot("runtime-work");
+      if (chat.running && work.waiting && work.progress === "50") break;
+      await sleep(20);
+    }
+    const waitingApproval = { chat: snapshot("runtime-chat"), work: snapshot("runtime-work") };
+    child.postMessage({
+      method: "conversation-dashboard/native-metadata",
+      payload: []
+    }, "*");
+    deadline = performance.now() + 1_500;
+    while (performance.now() < deadline) {
+      const chat = snapshot("runtime-chat");
+      const work = snapshot("runtime-work");
+      if (!chat.running && !chat.waiting && !chat.status && work.running && !work.waiting) break;
+      await sleep(20);
+    }
+    const emptyMetadata = { chat: snapshot("runtime-chat"), work: snapshot("runtime-work") };
+    child.postMessage({
+      method: "conversation-dashboard/native-metadata",
+      payload: [
+        { id: ${JSON.stringify(ids.chat)}, url: "https://chatgpt.com/c/${ids.chat}", runtimeStatus: "idle" },
+        { id: ${JSON.stringify(ids.work)}, url: "codex://threads/${ids.work}", runtimeStatus: "waitingOnUserInput" }
+      ]
+    }, "*");
+    deadline = performance.now() + 1_500;
+    while (performance.now() < deadline && snapshot("runtime-work").status !== "等待输入") await sleep(20);
+    const waitingInput = { chat: snapshot("runtime-chat"), work: snapshot("runtime-work") };
+    child.postMessage({
+      method: "conversation-dashboard/native-metadata",
+      payload: [
+        { id: ${JSON.stringify(ids.chat)}, url: "https://chatgpt.com/c/${ids.chat}", runtimeStatus: "idle" },
+        { id: ${JSON.stringify(ids.work)}, url: "codex://threads/${ids.work}", runtimeStatus: "idle" }
+      ]
+    }, "*");
+    child.postMessage({
+      method: "conversation-dashboard/native-runtime-status",
+      payload: [{ id: ${JSON.stringify(ids.work)}, runtimeStatus: "idle", progress: null }]
     }, "*");
     await sleep(80);
     const idle = { chat: snapshot("runtime-chat"), work: snapshot("runtime-work") };
     frame.remove();
     return {
-      active,
+      waitingApproval,
+      emptyMetadata,
+      waitingInput,
       idle,
       hostIntegration,
       boardExact: localStorage.getItem(storageKey) === originalBoard,
@@ -146,16 +186,47 @@ try {
   socket.close();
 }
 
-const activeRows = [result?.active?.chat, result?.active?.work];
+const approvalChat = result?.waitingApproval?.chat;
+const approvalWork = result?.waitingApproval?.work;
+const emptyChat = result?.emptyMetadata?.chat;
+const emptyWork = result?.emptyMetadata?.work;
+const inputChat = result?.waitingInput?.chat;
+const inputWork = result?.waitingInput?.work;
 const idleRows = [result?.idle?.chat, result?.idle?.work];
-result.ok = activeRows.every(row => row?.exists
-    && row.running
-    && row.progress === "50"
-    && row.fillRatio > 0.47
-    && row.fillRatio < 0.53
-    && row.status === "进行中"
-    && row.progressText === "50%"
-    && row.progressTitle === "上下文使用量 50%")
+result.ok = approvalChat?.exists
+  && approvalChat.running
+  && !approvalChat.waiting
+  && approvalChat.status === "进行中"
+  && approvalWork?.exists
+  && !approvalWork.running
+  && approvalWork.waiting
+  && approvalWork.progress === "50"
+  && approvalWork.fillRatio > 0.95
+  && approvalWork.status === "等待批准"
+  && approvalWork.progressText === "50%"
+  && approvalWork.progressTitle === "上下文使用量 50%"
+  && emptyChat?.exists
+  && !emptyChat.running
+  && !emptyChat.waiting
+  && emptyChat.progress === "0"
+  && !emptyChat.status
+  && !emptyChat.progressText
+  && emptyWork?.exists
+  && emptyWork.running
+  && !emptyWork.waiting
+  && emptyWork.progress === "50"
+  && emptyWork.fillRatio > 0.47
+  && emptyWork.fillRatio < 0.53
+  && emptyWork.status === "进行中"
+  && emptyWork.progressText === "50%"
+  && inputChat?.exists
+  && !inputChat.running
+  && !inputChat.waiting
+  && !inputChat.status
+  && inputWork?.exists
+  && !inputWork.running
+  && inputWork.waiting
+  && inputWork.status === "等待输入"
   && idleRows.every(row => row?.exists && !row.running && row.progress === "0" && !row.status && !row.progressText)
   && result.hostIntegration
   && result.boardExact

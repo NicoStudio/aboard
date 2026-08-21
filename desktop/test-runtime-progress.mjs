@@ -118,13 +118,145 @@ const idleFromNormalNoMatch = await threadAvailability(idleId, {
   }
 });
 
+const vanishedProbeError = (missingPaths, stdout = "") => Object.assign(
+  new Error("lsof raced with a removed lock"),
+  {
+    code: 1,
+    stdout,
+    stderr: missingPaths.map(candidate =>
+      `lsof: status error on ${candidate}: No such file or directory`
+    ).join("\n")
+  }
+);
+
+const singleMissingPath = path.join(lockDir, `${idleId}.lock`);
+let singleMissingStatCalls = 0;
+let singleMissingLsofCalls = 0;
+let singleMissingWaitCalls = 0;
+const idleAfterStatRace = await threadAvailability(idleId, {
+  writerLocksDir: lockDir,
+  statFile: async candidate => {
+    singleMissingStatCalls += 1;
+    if (candidate !== singleMissingPath) throw new Error(`Unexpected lock path: ${candidate}`);
+    if (singleMissingStatCalls === 1) return {};
+    throw Object.assign(new Error("lock vanished after stat"), { code: "ENOENT" });
+  },
+  waitForWriterLockRetry: async () => { singleMissingWaitCalls += 1; },
+  execFileAsync: async command => {
+    if (command !== "/usr/sbin/lsof") throw new Error(`Unexpected command: ${command}`);
+    singleMissingLsofCalls += 1;
+    throw vanishedProbeError([singleMissingPath]);
+  }
+});
+
+const activeLockPath = path.join(lockDir, `${activeId}.lock`);
+const idleLockPath = path.join(lockDir, `${idleId}.lock`);
+const mixedStatCalls = new Map();
+const mixedLsofArgs = [];
+let mixedWaitCalls = 0;
+const mixedSnapshots = await loadRuntimeSnapshots([activeId, idleId], {
+  disableCache: true,
+  writerLocksDir: lockDir,
+  statFile: async candidate => {
+    const calls = (mixedStatCalls.get(candidate) || 0) + 1;
+    mixedStatCalls.set(candidate, calls);
+    if (candidate === activeLockPath) return {};
+    if (candidate === idleLockPath && calls === 1) return {};
+    if (candidate === idleLockPath) {
+      throw Object.assign(new Error("idle lock vanished"), { code: "ENOENT" });
+    }
+    throw new Error(`Unexpected lock path: ${candidate}`);
+  },
+  waitForWriterLockRetry: async () => { mixedWaitCalls += 1; },
+  execFileAsync: async (command, args) => {
+    if (command === "/usr/sbin/lsof") {
+      mixedLsofArgs.push(args.slice());
+      if (mixedLsofArgs.length === 1) {
+        throw vanishedProbeError(
+          [idleLockPath],
+          `p123\nf9\nn${activeLockPath}\n`
+        );
+      }
+      return { stdout: `p123\nf9\nn${activeLockPath}\n`, stderr: "" };
+    }
+    if (command === "/usr/bin/sqlite3") {
+      return { stdout: JSON.stringify([{ id: activeId, rollout_path: rolloutPath }]), stderr: "" };
+    }
+    throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+  },
+  openFile: async candidate => {
+    if (candidate !== rolloutPath) throw new Error("Unexpected rollout path");
+    return {
+      stat: async () => ({ size: Buffer.byteLength(fixtureTail), mtimeMs: now }),
+      read: async buffer => {
+        buffer.write(fixtureTail);
+        return { bytesRead: Buffer.byteLength(fixtureTail), buffer };
+      },
+      close: async () => {}
+    };
+  }
+});
+const mixedRetryPathsExact = mixedLsofArgs.length === 2
+  && mixedLsofArgs[0].includes(activeLockPath)
+  && mixedLsofArgs[0].includes(idleLockPath)
+  && mixedLsofArgs[1].includes(activeLockPath)
+  && !mixedLsofArgs[1].includes(idleLockPath);
+
+let transientLsofCalls = 0;
+let transientWaitCalls = 0;
+const claimedAfterTransientRace = await threadAvailability(activeId, {
+  writerLocksDir: lockDir,
+  ownedRuntimePid: 100,
+  processParents: new Map([[123, 100], [100, 1]]),
+  statFile: async () => ({}),
+  waitForWriterLockRetry: async () => { transientWaitCalls += 1; },
+  execFileAsync: async command => {
+    if (command !== "/usr/sbin/lsof") throw new Error(`Unexpected command: ${command}`);
+    transientLsofCalls += 1;
+    if (transientLsofCalls === 1) throw vanishedProbeError([activeLockPath]);
+    return { stdout: `p123\nf9\nn${activeLockPath}\n`, stderr: "" };
+  }
+});
+
+const retryUnknownFailure = async retryError => {
+  let calls = 0;
+  let waits = 0;
+  let rejected = false;
+  try {
+    await threadAvailability(activeId, {
+      writerLocksDir: lockDir,
+      statFile: async () => ({}),
+      waitForWriterLockRetry: async () => { waits += 1; },
+      execFileAsync: async command => {
+        if (command !== "/usr/sbin/lsof") throw new Error(`Unexpected command: ${command}`);
+        calls += 1;
+        if (calls === 1) throw vanishedProbeError([activeLockPath]);
+        throw retryError;
+      }
+    });
+  } catch {
+    rejected = true;
+  }
+  return { calls, waits, rejected };
+};
+const retryPermissionFailure = await retryUnknownFailure(Object.assign(
+  new Error("lsof permission failure after retry"),
+  { code: 1, stdout: "", stderr: "permission denied" }
+));
+const retryTimeoutFailure = await retryUnknownFailure(Object.assign(
+  new Error("lsof timeout after retry"),
+  { code: "ETIMEDOUT", killed: true, signal: "SIGTERM", stdout: "", stderr: "" }
+));
+
 let timeoutRejected = false;
+let timeoutCalls = 0;
 try {
   await threadAvailability(activeId, {
     writerLocksDir: lockDir,
     statFile: async () => ({}),
     execFileAsync: async command => {
       if (command !== "/usr/sbin/lsof") throw new Error(`Unexpected command: ${command}`);
+      timeoutCalls += 1;
       throw Object.assign(new Error("lsof timed out"), {
         code: "ETIMEDOUT",
         killed: true,
@@ -139,12 +271,14 @@ try {
 }
 
 let permissionRejected = false;
+let permissionCalls = 0;
 try {
   await threadAvailability(activeId, {
     writerLocksDir: lockDir,
     statFile: async () => ({}),
     execFileAsync: async command => {
       if (command !== "/usr/sbin/lsof") throw new Error(`Unexpected command: ${command}`);
+      permissionCalls += 1;
       throw Object.assign(new Error("lsof permission failure"), {
         code: 1,
         stdout: "",
@@ -172,7 +306,27 @@ const result = {
     idle: idleAvailability,
     noMatch: idleFromNormalNoMatch
   },
-  lockProbeFailures: { timeoutRejected, permissionRejected, missingLockFiltered },
+  lockProbeRaces: {
+    singleMissing: idleAfterStatRace,
+    mixedSnapshots,
+    claimedAfterTransientRace,
+    singleMissingStatCalls,
+    singleMissingLsofCalls,
+    singleMissingWaitCalls,
+    mixedRetryPathsExact,
+    mixedWaitCalls,
+    transientLsofCalls,
+    transientWaitCalls
+  },
+  lockProbeFailures: {
+    timeoutRejected,
+    permissionRejected,
+    timeoutCalls,
+    permissionCalls,
+    retryPermissionFailure,
+    retryTimeoutFailure,
+    missingLockFiltered
+  },
   invalidRejected,
   ok: direct.active.runtimeStatus === "active"
     && direct.active.progress === 50
@@ -197,8 +351,30 @@ const result = {
     && idleAvailability.ownership === "none"
     && idleFromNormalNoMatch.claimed === false
     && idleFromNormalNoMatch.ownership === "none"
+    && idleAfterStatRace.claimed === false
+    && idleAfterStatRace.ownership === "none"
+    && singleMissingStatCalls === 2
+    && singleMissingLsofCalls === 1
+    && singleMissingWaitCalls === 0
+    && mixedSnapshots.find(entry => entry.id === activeId)?.runtimeStatus === "active"
+    && mixedSnapshots.find(entry => entry.id === activeId)?.progress === 50
+    && mixedSnapshots.find(entry => entry.id === idleId)?.runtimeStatus === "idle"
+    && mixedRetryPathsExact
+    && mixedWaitCalls === 1
+    && claimedAfterTransientRace.claimed === true
+    && claimedAfterTransientRace.ownership === "self"
+    && transientLsofCalls === 2
+    && transientWaitCalls === 1
     && timeoutRejected
     && permissionRejected
+    && timeoutCalls === 1
+    && permissionCalls === 1
+    && retryPermissionFailure.rejected
+    && retryPermissionFailure.calls === 2
+    && retryPermissionFailure.waits === 1
+    && retryTimeoutFailure.rejected
+    && retryTimeoutFailure.calls === 2
+    && retryTimeoutFailure.waits === 1
     && missingLockFiltered
     && invalidRejected
 };

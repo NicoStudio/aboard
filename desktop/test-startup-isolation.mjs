@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -204,26 +204,42 @@ async function runNeutralRouteIdempotenceTest() {
   const source = await readFile(launcherPath, "utf8");
   const expression = extractNeutralExpression(source);
   const messages = [];
+  const location = { pathname: "/index.html" };
+  let nativeConversationId = "11111111-1111-4111-8111-111111111111";
   const window = {
     postMessage(message, origin) {
       messages.push({ message, origin });
+      // Model a route listener that was not ready for the first message. The
+      // startup helper must retry and only publish its handled marker after the
+      // neutral path is observably committed.
+      if (messages.length === 2) nativeConversationId = "";
     }
   };
   const document = {
     readyState: "complete",
     querySelector(selector) {
-      return selector === "aside" ? {} : null;
+      if (selector === "aside") return {};
+      if (selector === "[data-above-composer-conversation-id]" && nativeConversationId) {
+        return { getAttribute: () => nativeConversationId };
+      }
+      return null;
     }
   };
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const evaluate = new AsyncFunction("window", "document", `return await (${expression});`);
+  const evaluate = new AsyncFunction("window", "document", "location", `return await (${expression});`);
 
-  assert.equal(await evaluate(window, document), true);
-  assert.equal(await evaluate(window, document), true);
-  assert.deepEqual(messages, [{
-    message: { type: "navigate-to-route", path: "/", replace: true },
-    origin: "*"
-  }], "repeated startup probes must emit exactly one neutral navigation");
+  assert.equal(await evaluate(window, document, location), true);
+  assert.equal(location.pathname, "/index.html", "startup neutralization must not depend on the shell URL");
+  assert.equal(nativeConversationId, "", "startup neutralization must wait for the mounted conversation to clear");
+  assert.equal(window.__aboardStartupNeutralHandled, true,
+    "startup neutralization must publish its handled marker only after route confirmation");
+  assert.equal(await evaluate(window, document, location), true);
+  assert.deepEqual(messages, [
+    { message: { type: "navigate-to-route", path: "/", replace: true }, origin: "*" },
+    { message: { type: "navigate-to-route", path: "/", replace: true }, origin: "*" },
+    { message: { type: "navigate-to-route", path: "/", replace: true }, origin: "*" },
+    { message: { type: "navigate-to-route", path: "/", replace: true }, origin: "*" }
+  ], "a lost startup message must be retried, while a confirmed route remains idempotent");
 
   const mainMatch = source.match(/async function main\(\) \{([\s\S]*?)\n\}\n\nconst isMainModule/);
   assert.ok(mainMatch, "launcher main function was not found");
@@ -245,6 +261,30 @@ async function runNeutralRouteIdempotenceTest() {
   for (const forbidden of ["thread/resume", "thread/start", "navigate-to-route\", path: \"/local/"]) {
     assert.equal(source.includes(forbidden), false, `launcher must not claim a task at startup (${forbidden})`);
   }
+}
+
+async function runWorkspaceRendererReadinessTest() {
+  const { ensureRuntime } = await import(`${pathToFileURL(launcherPath).href}?startup-readiness-test=${Date.now()}`);
+  const workspace = {
+    id: "workspace",
+    type: "page",
+    url: "app://-/index.html",
+    webSocketDebuggerUrl: "ws://127.0.0.1/workspace"
+  };
+  let calls = 0;
+  const pages = await ensureRuntime({
+    timeoutMs: 1_000,
+    runtimeIsAlive: () => true,
+    pause: async () => {},
+    loadPages: async () => {
+      calls += 1;
+      if (calls === 1) return [{ type: "browser", url: "", webSocketDebuggerUrl: "ws://127.0.0.1/browser" }];
+      if (calls === 2) return [{ ...workspace, id: "avatar", url: "app://-/index.html/avatar-overlay" }];
+      return [workspace];
+    }
+  });
+  assert.equal(calls, 3, "startup must wait for the actual workspace page, not merely an open CDP endpoint");
+  assert.equal(pages[0]?.id, "workspace");
 }
 
 function rendererInjectionSource(source) {
@@ -386,6 +426,7 @@ async function runDocumentStartInjectionTest() {
 
 await runWrapperIsolationTest();
 await runProfilePreparationTest();
+await runWorkspaceRendererReadinessTest();
 await runNeutralRouteIdempotenceTest();
 await runDocumentStartInjectionTest();
 console.log("Aboard startup isolation verification passed.");

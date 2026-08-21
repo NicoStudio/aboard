@@ -204,26 +204,23 @@ const evaluation = await send("Runtime.evaluate", {
         return null;
       };
 
-      // Aboard owns only the dashboard surface. Showing it from a task route
-      // must first send the host to the neutral route so this second Codex
-      // renderer never resumes the task and competes for its writer lock.
+      // Returning through the sidebar Aboard entry must preserve the native
+      // route underneath the overlay. This lets a running conversation keep
+      // its mounted writer and makes an immediate board-to-conversation round
+      // trip possible without a second resume.
       if (surface.dataset.active !== "true") entry.click();
       await waitFor(() => surface.dataset.active === "true");
       routeMessages.length = 0;
       hideButton.click();
       await waitFor(() => surface.dataset.active === "false");
-      // Production intentionally coalesces very rapid repeated Aboard opens.
-      // Wait beyond that small window so this assertion measures the route
-      // contract, not the anti-flash debounce.
-      await sleep(280);
       history.pushState({ aboardHandoffTest: true }, "", "/local/" + neutralThreadId);
       entry.click();
-      await waitFor(() => routeMessages.length === 1 && surface.dataset.active === "true");
+      await waitFor(() => surface.dataset.active === "true");
+      await sleep(80);
       results.neutralRoute = {
-        emittedOnce: routeMessages.length === 1,
-        exactPath: routeMessages[0]?.path === "/",
-        emittedBeforeVisible: routeMessages[0]?.activeAtCall !== "true",
-        visibleAfterRequest: surface.dataset.active === "true",
+        emittedNone: routeMessages.length === 0,
+        pathPreserved: location.pathname === "/local/" + neutralThreadId,
+        visibleWithoutNavigation: surface.dataset.active === "true",
         noBridgeRequest: bridgeRequests.length === 0
       };
       history.replaceState(originalHistoryState, "", originalPath);

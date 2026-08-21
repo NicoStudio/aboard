@@ -219,7 +219,7 @@ const response = await send("Runtime.evaluate", {
       const duplicateChatTarget = doc.querySelector('[data-drop-kind="chat"][data-drop-topic="professional"]');
       child.openImportEditor(duplicateChatTarget, {
         title: ${JSON.stringify(renamedChatTitle)},
-        url: "https://www.chatgpt.com/c/TITLE%2DVISIBILITY%2DCHAT%2DTHREAD/?source=manual"
+        url: "https://www.chatgpt.com/c/title%2Dvisibility%2Dchat%2Dthread/?source=manual"
       });
       await settleRender();
       const duplicateEditorInput = doc.getElementById("item-title");
@@ -240,7 +240,7 @@ const response = await send("Runtime.evaluate", {
         countBefore: countBeforeDuplicateImports,
         countAfter: child.eval("board.items.length"),
         editor: duplicateEditor,
-        normalized: child.eval("JSON.stringify([normalizedThreadId('https://chat.openai.com/c/TITLE%2DVISIBILITY%2DCHAT%2DTHREAD/?x=1'), normalizedThreadId('codex://threads/title-visibility-chat-thread?hostId=abc')])"),
+        normalized: child.eval("JSON.stringify([normalizedThreadId('https://chat.openai.com/c/TITLE%2DVISIBILITY%2DCHAT%2DTHREAD/?x=1'), normalizedThreadId('codex://threads/TITLE-VISIBILITY-CHAT-THREAD?hostId=abc')])"),
         items: child.eval("board.items.filter(item => item.id.startsWith('title-visibility-')).map(item => ({ id: item.id, title: item.title, titleHidden: item.titleHidden, url: item.url }))"),
         dom: domLeakState()
       };
@@ -313,7 +313,7 @@ const response = await send("Runtime.evaluate", {
         && result.duplicates.editor.dom.appLeaks.length === 0
         && result.duplicates.editor.dom.documentLeaks.length === 0
         && result.duplicates.editor.dom.attributeLeaks.length === 0
-        && result.duplicates.normalized === JSON.stringify(["title-visibility-chat-thread", "title-visibility-chat-thread"])
+        && result.duplicates.normalized === JSON.stringify(["TITLE-VISIBILITY-CHAT-THREAD", "title-visibility-chat-thread"])
         && duplicateItems.length === 2
         && duplicateItems.every(item => item.titleHidden === true)
         && duplicateItems.some(item => item.id === "title-visibility-chat" && item.title === ${JSON.stringify(renamedChatTitle)})

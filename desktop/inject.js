@@ -3,7 +3,7 @@
 
   const ACTIVE_HANDOFF_BINDING = __ABOARD_HANDOFF_BINDING__;
   window.__conversationDashboardBindingName = ACTIVE_HANDOFF_BINDING;
-  const INJECTION_VERSION = 65;
+  const INJECTION_VERSION = 66;
   if (window.__conversationDashboardInstalled) {
     if (window.__conversationDashboardVersion === INJECTION_VERSION) return;
     window.__conversationDashboardCleanup?.();
@@ -49,6 +49,7 @@
   const DRAG_PREVIEW_ID = "conversation-dashboard-drag-preview";
   const NATIVE_VIEW_STATE_KEY = "conversation-dashboard-native-view";
   const NATIVE_ID_ALIASES_KEY = "conversation-dashboard-native-id-aliases";
+  const PRESERVED_OVERLAY_ROUTE_KEY = "conversation-dashboard-preserved-overlay-route";
   const PLUGINS_LABELS = new Set(["Plugins", "插件"]);
   const WORK_THREAD_SELECTOR = "[data-app-action-sidebar-thread-row]";
   const CHAT_THREAD_WRAPPER_SELECTOR = '[data-sidebar-chatgpt-conversation-key^="chatgpt:conversation:"]';
@@ -124,6 +125,13 @@
   let lastCompletedDragRow = null;
   const listenerController = new AbortController();
   const listenerOptions = { signal: listenerController.signal };
+  let startupRouteNeutralized = false;
+  let openAttempt = 0;
+  let preservedOverlayRoute = (() => {
+    try { return String(sessionStorage.getItem(PRESERVED_OVERLAY_ROUTE_KEY) || ""); }
+    catch { return ""; }
+  })();
+  let internalNativeRowClickAttempt = 0;
 
   const icon = `
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -442,24 +450,41 @@
     return normalizedNativeId(row?.dataset?.appActionSidebarThreadId || wrapperKey || projectConversationId);
   }
 
-  function currentRouteConversationId() {
+  function currentNativeConversationIdentity() {
+    const composerValue = String(document.querySelector("[data-above-composer-conversation-id]")
+      ?.getAttribute("data-above-composer-conversation-id") || "").trim();
+    const chatComposerId = composerValue.match(/^chatgpt:(?:conversation:)?([A-Za-z0-9_-]{12,})$/)?.[1] || "";
+    if (chatComposerId) return { id: chatComposerId, kind: "chat" };
+    const workComposerId = stableLocalThreadId(composerValue.replace(/^local:/, ""));
+    if (workComposerId) return { id: workComposerId, kind: "work" };
+
+    const activeRow = allThreadRows().find(nativeRowActive) || null;
+    if (activeRow) {
+      const chatWrapper = chatConversationWrapper(activeRow);
+      const rawId = rawRowId(activeRow);
+      if (chatWrapper && /^[A-Za-z0-9_-]{12,}$/.test(rawId)) return { id: rawId, kind: "chat" };
+      const resolvedWorkId = stableLocalThreadId(rawId) || resolvedWorkConversationId(activeRow);
+      if (resolvedWorkId) return { id: resolvedWorkId, kind: "work" };
+    }
+
     try {
       const pathname = decodeURIComponent(location.pathname).replace(/\/$/, "");
-      return pathname.match(/^\/local\/([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/i)?.[1]
-        || pathname.match(/^\/work\/conversation\/([A-Za-z0-9_-]{12,})$/)?.[1]
-        || "";
+      const localId = pathname.match(/^\/local\/([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/i)?.[1];
+      if (localId) return { id: localId, kind: "work" };
+      const chatId = pathname.match(/^\/work\/conversation\/([A-Za-z0-9_-]{12,})$/)?.[1];
+      if (chatId) return { id: chatId, kind: "chat" };
     } catch {
-      return "";
+      return null;
     }
+    return null;
+  }
+
+  function currentRouteConversationId() {
+    return currentNativeConversationIdentity()?.id || "";
   }
 
   function currentRouteSurfaceKind() {
-    try {
-      const pathname = decodeURIComponent(location.pathname).replace(/\/$/, "");
-      if (/^\/local\//i.test(pathname)) return "work";
-      if (/^\/work\/conversation\//i.test(pathname)) return "chat";
-    } catch {}
-    return "";
+    return currentNativeConversationIdentity()?.kind || "";
   }
 
   function nativeIdAliases() {
@@ -1282,6 +1307,14 @@
     window.postMessage({ type: "navigate-to-route", path: "/", replace: true }, "*");
   }
 
+  function neutralizeStartupRouteOnce() {
+    if (startupRouteNeutralized) return;
+    startupRouteNeutralized = true;
+    const startupNeutralHandled = window.__aboardStartupNeutralHandled === true;
+    delete window.__aboardStartupNeutralHandled;
+    if (!startupNeutralHandled) requestNeutralHostRoute();
+  }
+
   function rememberNativeView(reason = "native") {
     try {
       sessionStorage.setItem(NATIVE_VIEW_STATE_KEY, JSON.stringify({ reason, startedAt: Date.now() }));
@@ -1363,19 +1396,223 @@
     reportCreateError(message);
   }
 
+  function internalConversationRoute(payload = {}) {
+    try {
+      const url = new URL(String(payload.url || "").trim());
+      if (url.username || url.password || url.port || url.hash) return null;
+      const decodedPath = decodeURIComponent(url.pathname).replace(/\/$/, "");
+      if (url.protocol === "codex:" && url.hostname === "threads") {
+        const id = decodedPath.match(/^\/([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/i)?.[1];
+        if (!id) return null;
+        const keys = [...url.searchParams.keys()];
+        if (keys.some(key => key !== "hostId") || url.searchParams.getAll("hostId").length > 1) return null;
+        const explicitHostId = url.searchParams.has("hostId") ? String(url.searchParams.get("hostId") || "").trim() : "";
+        if (url.searchParams.has("hostId") && !explicitHostId) return null;
+        const payloadHostId = String(payload.hostId || "").trim();
+        const hostId = explicitHostId || (payloadHostId && payloadHostId !== "local" ? payloadHostId : "");
+        return {
+          id,
+          hostId,
+          local: true,
+          path: `/local/${encodeURIComponent(id)}${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ""}`
+        };
+      }
+      const host = url.hostname.toLowerCase();
+      if (url.protocol !== "https:" || !["chatgpt.com", "www.chatgpt.com", "chat.openai.com", "www.chat.openai.com"].includes(host)) return null;
+      const id = decodedPath.match(/^\/c\/([A-Za-z0-9_-]{12,})$/)?.[1];
+      return id ? { id, hostId: "", local: false, path: `/work/conversation/${encodeURIComponent(id)}` } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function isCurrentConversationRoute(route) {
+    if (!route?.id) return false;
+    const current = currentNativeConversationIdentity();
+    if (!current || current.kind !== (route.local ? "work" : "chat")) return false;
+    return route.local
+      ? String(current.id).toLowerCase() === String(route.id).toLowerCase()
+      : String(current.id) === String(route.id);
+  }
+
+  function routeLocationKey(route) {
+    if (!route?.id) return "";
+    const id = route.local ? String(route.id).toLowerCase() : String(route.id);
+    return `${route.local ? "work" : "chat"}:${id}`;
+  }
+
+  function currentConversationLocationKey() {
+    const current = currentNativeConversationIdentity();
+    if (!current) return "";
+    const id = current.kind === "work" ? String(current.id).toLowerCase() : String(current.id);
+    return `${current.kind}:${id}`;
+  }
+
+  function setPreservedOverlayRoute(value = "") {
+    preservedOverlayRoute = String(value || "");
+    try {
+      if (preservedOverlayRoute) sessionStorage.setItem(PRESERVED_OVERLAY_ROUTE_KEY, preservedOverlayRoute);
+      else sessionStorage.removeItem(PRESERVED_OVERLAY_ROUTE_KEY);
+    } catch {}
+  }
+
+  function isPreservedCurrentConversationRoute(route) {
+    const key = routeLocationKey(route);
+    return Boolean(key && preservedOverlayRoute === key && isCurrentConversationRoute(route));
+  }
+
+  function beginOpenAttempt() {
+    openAttempt += 1;
+    return openAttempt;
+  }
+
+  function cancelOpenAttempt() {
+    openAttempt += 1;
+  }
+
+  function openAttemptIsActive(attempt) {
+    return attempt === openAttempt && active;
+  }
+
+  function mountedNativeConversationRow(route) {
+    if (!route?.id) return null;
+    const expectedId = String(route.id);
+    return allThreadRows().find(row => {
+      const payload = threadPayload(row);
+      if (!payload || payload.surfaceKind !== (route.local ? "work" : "chat")) return false;
+      const sameId = route.local
+        ? String(payload.id).toLowerCase() === expectedId.toLowerCase()
+        : String(payload.id) === expectedId;
+      if (!sameId) return false;
+      const rowHostId = String(payload.hostId || "");
+      if (route.hostId ? rowHostId !== route.hostId : route.local && rowHostId && rowHostId !== "local") return false;
+      return true;
+    }) || null;
+  }
+
+  async function confirmInternalConversationRoute(route, attempt) {
+    const outcome = await waitFor(() => {
+      if (attempt !== openAttempt || active) return "cancelled";
+      return isCurrentConversationRoute(route) ? "confirmed" : null;
+    }, 2_000);
+    if (attempt !== openAttempt || active || outcome === "cancelled") return true;
+    if (outcome === "confirmed") return true;
+    lastOpenErrorMessage = "原生会话页面没有完成跳转，请重试";
+    showDashboard();
+    return false;
+  }
+
+  async function revealMountedNativeConversation(row, route, attempt) {
+    if (!openAttemptIsActive(attempt)) return true;
+    if (!row || !row.isConnected) {
+      lastOpenErrorMessage = "原生会话入口尚未恢复，请稍后再试";
+      return false;
+    }
+    rememberNativeView("mounted-conversation");
+    hideDashboard();
+    internalNativeRowClickAttempt = attempt;
+    try {
+      row.click();
+    } catch (_) {
+      internalNativeRowClickAttempt = 0;
+      if (attempt !== openAttempt) return true;
+      lastOpenErrorMessage = "原生会话入口暂时无法打开，请重试";
+      showDashboard();
+      return false;
+    } finally {
+      if (internalNativeRowClickAttempt === attempt) internalNativeRowClickAttempt = 0;
+    }
+    return confirmInternalConversationRoute(route, attempt);
+  }
+
+  function navigateInternalConversation(route) {
+    const testSink = window.__conversationDashboardRouteTestSink;
+    if (typeof testSink === "function") testSink(route.path);
+    else window.postMessage({ type: "navigate-to-route", path: route.path }, "*");
+  }
+
+  async function openInternalConversationRoute(route, attempt) {
+    if (!openAttemptIsActive(attempt)) return true;
+    if (isCurrentConversationRoute(route)) {
+      lastOpenErrorMessage = "原生会话入口尚未恢复，无法仅凭旧路由确认会话已打开";
+      return false;
+    }
+    rememberNativeView("open-conversation");
+    hideDashboard();
+    navigateInternalConversation(route);
+    return confirmInternalConversationRoute(route, attempt);
+  }
+
   async function openNativeConversation(payload = {}) {
+    const attempt = beginOpenAttempt();
     lastOpenErrorMessage = "";
     const unfinishedCreation = pendingDestination();
     if (unfinishedCreation && !unfinishedCreation.threadId) clearPendingCreation(unfinishedCreation);
-    // Aboard is an index, not a second conversation runtime. Every board item
-    // is handed to the official ChatGPT/Codex client, including conversations
-    // that are already running there. The board itself stays available.
-    const opened = await handoffNativeConversation(payload);
-    if (!opened) lastOpenErrorMessage = "无法在 ChatGPT/Codex 中打开该会话，请重试";
-    return opened;
+    // Installed pointer/drag regressions opt into the HTTP compatibility path
+    // so their synthetic activations can never reach a native conversation.
+    if (window.__conversationDashboardUseHttpTestBridge === true) {
+      const opened = await handoffNativeConversation(payload);
+      return openAttemptIsActive(attempt) ? opened : true;
+    }
+    const route = internalConversationRoute(payload);
+    if (!route) {
+      lastOpenErrorMessage = "原会话链接格式无效，请在设置中重新绑定";
+      return false;
+    }
+    if (isPreservedCurrentConversationRoute(route)) {
+      rememberNativeView("current-conversation");
+      hideDashboard();
+      return true;
+    }
+    // Give virtualized Recents and project rows one bounded opportunity to
+    // mount before deciding whether this Aboard runtime can reuse an existing
+    // native conversation view.
+    await ensureThreadRowsVisible();
+    if (!openAttemptIsActive(attempt)) return true;
+    if (isPreservedCurrentConversationRoute(route)) {
+      rememberNativeView("current-conversation");
+      hideDashboard();
+      return true;
+    }
+    if (!route.local) {
+      const nativeRow = mountedNativeConversationRow(route);
+      if (nativeRow) return revealMountedNativeConversation(nativeRow, route, attempt);
+    }
+    if (route.local) {
+      const request = callHostBridgeResult("thread-availability", { id: route.id }, 6_000);
+      if (!request) {
+        lastOpenErrorMessage = "Aboard 暂时无法确认会话状态，请重试";
+        return false;
+      }
+      const result = await request;
+      if (!openAttemptIsActive(attempt)) return true;
+      if (!result?.ok) {
+        lastOpenErrorMessage = "Aboard 暂时无法确认会话状态，请重试";
+        return false;
+      }
+      const availability = result.value;
+      const safeIdle = availability?.claimed === false && availability?.ownership === "none";
+      const safeSelf = availability?.claimed === true && availability?.ownership === "self";
+      if (safeIdle || safeSelf) {
+        const nativeRow = mountedNativeConversationRow(route);
+        if (nativeRow) return revealMountedNativeConversation(nativeRow, route, attempt);
+        if (safeSelf) {
+          lastOpenErrorMessage = "该会话正在 Aboard 中运行，但原生会话入口尚未恢复；请稍后再试";
+          return false;
+        }
+      }
+      if (!safeIdle) {
+        lastOpenErrorMessage = availability?.claimed === true && availability?.ownership === "other"
+          ? "该本地会话正在另一个 Codex/ChatGPT 进程中使用；请先完整退出占用它的客户端，再回到 Aboard 打开"
+          : "Aboard 暂时无法确认会话状态，请重试";
+        return false;
+      }
+    }
+    return openInternalConversationRoute(route, attempt);
   }
 
   async function createNativeConversation(rawDestination) {
+    if (typeof cancelOpenAttempt === "function") cancelOpenAttempt();
     if (nativeCreationStarting || pendingDestination()) {
       reportCreateError("已有一条会话正在创建，请先完成后再新建");
       return;
@@ -1533,6 +1770,12 @@
     return createdAt >= startedAt - secondPrecisionTolerance ? "fresh" : "stale";
   }
 
+  function stableCreatedConversationTitle(value) {
+    const title = String(value || "").trim();
+    if (!title) return "";
+    return /^(?:new (?:chat|conversation|task)|untitled|新建对话|新对话|新任务|未命名(?:会话)?)$/i.test(title) ? "" : title;
+  }
+
   async function captureCreatedConversation() {
     if (captureCreationInFlight) return;
     let pending = pendingDestination();
@@ -1553,6 +1796,11 @@
         : null;
       const routePayload = routeRow ? threadPayload(routeRow) : null;
       const freshness = createdRouteFreshness(pending, routeId, routePayload);
+      const observedThreadId = String(pending.observedThreadId || "");
+      if (!pending.threadId && observedThreadId && routeId && routeId !== observedThreadId) {
+        clearPendingCreation(pending);
+        return;
+      }
       const canInspectRoute = !pending.threadId
         && routeId
         && routeKind === pending.destination?.kind
@@ -1560,16 +1808,42 @@
         && routeRow
         && routePayload?.id === routeId
         && routePayload?.surfaceKind === routeKind;
+      if (!pending.threadId && observedThreadId
+        && (!routeId || (routeId === observedThreadId && !canInspectRoute))) {
+        if (pending.observedAt || pending.observedTitle) {
+          delete pending.observedAt;
+          delete pending.observedTitle;
+          persistPendingCreation(pending);
+        }
+        return;
+      }
       if (canInspectRoute && freshness === "stale") {
         clearPendingCreation(pending);
         return;
       }
       if (canInspectRoute && freshness === "unknown") {
+        const stableTitle = stableCreatedConversationTitle(routePayload?.title);
+        const observationChanged = observedThreadId !== routeId
+          || Boolean(pending.observedAt || pending.observedTitle);
         pending.observedThreadId = routeId;
-        pending.observedAt = pending.observedAt || Date.now();
-        persistPendingCreation(pending);
+        if (!stableTitle) {
+          delete pending.observedAt;
+          delete pending.observedTitle;
+          if (observationChanged) persistPendingCreation(pending);
+          return;
+        }
+        const sameStableObservation = observedThreadId === routeId
+          && pending.observedTitle === stableTitle
+          && Number(pending.observedAt || 0) > 0;
+        if (!sameStableObservation) {
+          pending.observedTitle = stableTitle;
+          pending.observedAt = Date.now();
+          persistPendingCreation(pending);
+          return;
+        }
+        if (Date.now() - Number(pending.observedAt) < 400) return;
       }
-      if (canInspectRoute && freshness === "fresh") {
+      if (canInspectRoute && (freshness === "fresh" || freshness === "unknown")) {
         if (routeKind === "work") {
           const provisionalRows = rows.filter(row => {
             const id = rawRowId(row);
@@ -1582,13 +1856,13 @@
         pending.threadId = routeId;
         delete pending.observedThreadId;
         delete pending.observedAt;
+        delete pending.observedTitle;
         delete pending.returnRequestedAt;
         persistPendingCreation(pending);
       }
       const candidates = rows.filter(row => !existingIds.has(normalizedRowId(row)));
       const titledCandidates = candidates.filter(candidate => {
-        const title = nativeRowTitle(candidate, conversationCache());
-        return title && title !== "New chat" && title !== "新建对话";
+        return Boolean(stableCreatedConversationTitle(nativeRowTitle(candidate, conversationCache())));
       });
       const targetId = String(pending.threadId || "");
       const routeCandidate = targetId
@@ -1599,7 +1873,7 @@
       // sufficiently strong identity to place a newly created conversation.
       const row = routeCandidate || null;
       const payload = threadPayload(row);
-      if (!payload || !payload.title || payload.title === "New chat" || payload.title === "新建对话") return;
+      if (!payload || !stableCreatedConversationTitle(payload.title)) return;
       if (payload.surfaceKind !== pending.destination?.kind) return;
       const latestPending = pendingDestination();
       if (!samePendingCreation(latestPending, pending) || pendingCreationToken(latestPending) !== pendingToken) return;
@@ -1617,32 +1891,49 @@
   }
 
   let returnToDashboardInFlight = false;
+  let returnToDashboardRequestedAttempt = 0;
   async function returnToDashboard() {
+    if (typeof cancelOpenAttempt === "function") cancelOpenAttempt();
+    returnToDashboardRequestedAttempt = typeof openAttempt === "number" ? openAttempt : 0;
     if (returnToDashboardInFlight) return;
     returnToDashboardInFlight = true;
     try {
       const pending = pendingDestination();
+      const routeBeforeCapture = currentRouteConversationId();
+      const routeKindBeforeCapture = currentRouteSurfaceKind();
+      if (typeof openAttempt === "number" && returnToDashboardRequestedAttempt !== openAttempt) return;
+      showDashboard({ preserveNativeRoute: true });
       if (pending && !pending.threadId) {
         await captureCreatedConversation();
+        if (typeof openAttempt === "number" && returnToDashboardRequestedAttempt !== openAttempt) return;
         const latest = pendingDestination();
         if (latest && samePendingCreation(latest, pending) && !latest.threadId) {
           const routeId = currentRouteConversationId();
-          if (!latest.observedThreadId || latest.observedThreadId !== routeId) {
+          const routeKind = currentRouteSurfaceKind();
+          const existingIds = new Set(latest.beforeIds || []);
+          const observedThreadId = String(latest.observedThreadId || "");
+          const stableNewRoute = routeId
+            && routeId === routeBeforeCapture
+            && routeKind === routeKindBeforeCapture
+            && routeKind === latest.destination?.kind
+            && !existingIds.has(routeId)
+            && (!observedThreadId || observedThreadId === routeId);
+          if (!stableNewRoute) {
             clearPendingCreation(latest);
           } else {
+            latest.observedThreadId = routeId;
             latest.returnRequestedAt = latest.returnRequestedAt || Date.now();
             persistPendingCreation(latest);
             startCreationTracking();
           }
         }
       }
-      showDashboard();
     } finally {
       returnToDashboardInFlight = false;
     }
   }
 
-  function showDashboard() {
+  function showDashboard({ preserveNativeRoute = false } = {}) {
     let entry = document.getElementById(ENTRY_ID);
     if (!entry) {
       if (!ensureInstalled()) return;
@@ -1651,15 +1942,13 @@
     if (!entry) return;
     const surface = ensureSurface(entry);
     if (!surface) return;
+    setPreservedOverlayRoute(preserveNativeRoute ? currentConversationLocationKey() : "");
     clearNativeViewState();
-    // Aboard is a board-only companion. Release any task restored by the
-    // underlying cloned client before revealing the dashboard so it cannot
-    // compete with the official Codex app for the same task writer.
-    if (!active) {
-      const startupNeutralHandled = window.__aboardStartupNeutralHandled === true;
-      delete window.__aboardStartupNeutralHandled;
-      if (!startupNeutralHandled) requestNeutralHostRoute();
-    }
+    // The ordinary startup path releases a task restored by the cloned client
+    // exactly once. An explicit click on the Aboard entry is different: the
+    // board is an overlay and must preserve the current native conversation so
+    // selecting that same item can reveal it without resuming a second writer.
+    if (!active && !preserveNativeRoute) neutralizeStartupRouteOnce();
     const firstActivation = !active;
     active = true;
     syncSurfaceBounds(surface, previousMain);
@@ -1674,6 +1963,11 @@
       previousMain.style.visibility = "hidden";
       previousMain.setAttribute("aria-hidden", "true");
     }
+    if (firstActivation || preserveNativeRoute) {
+      surface.querySelectorAll("iframe").forEach(frame => {
+        frame.contentWindow?.postMessage({ method: "conversation-dashboard/board-activated" }, "*");
+      });
+    }
     if (firstActivation) void hydrateRecentThreads({ force: true });
     setTimeout(postNativeMetadata, 80);
     clearInterval(metadataPollTimer);
@@ -1683,6 +1977,7 @@
 
   function hideDashboard() {
     cancelCurrentGesture("dashboard-hidden");
+    setPreservedOverlayRoute("");
     if (!active) return;
     clearInterval(metadataPollTimer);
     metadataPollTimer = null;
@@ -1725,6 +2020,7 @@
     }
     const nativeRow = event.target.closest?.(NATIVE_THREAD_SELECTOR);
     if (!active) {
+      if (nativeRow && internalNativeRowClickAttempt === 0) cancelOpenAttempt();
       const unfinishedCreation = pendingDestination();
       if (nativeRow && unfinishedCreation && !unfinishedCreation.threadId) {
         clearPendingCreation(unfinishedCreation);
@@ -1733,7 +2029,10 @@
     }
     if (nativeRow) {
       const nativeButton = event.target.closest?.("button");
-      if (nativeButton && nativeButton !== nativeRow) return;
+      if (nativeButton && nativeButton !== nativeRow) {
+        cancelOpenAttempt();
+        return;
+      }
       event.preventDefault();
       event.stopImmediatePropagation();
       if (nativeRow === lastCompletedDragRow && Date.now() - lastCompletedDragAt < 450) return;
@@ -1746,6 +2045,7 @@
     }
     const sidebarButton = event.target.closest?.("aside button");
     if (sidebarButton) {
+      cancelOpenAttempt();
       rememberNativeView("sidebar");
       hideDashboard();
     }
@@ -1820,6 +2120,7 @@
   }, listenerOptions);
 
   window.__conversationDashboardCleanup = () => {
+    cancelOpenAttempt();
     cancelCurrentGesture("cleanup");
     listenerController.abort();
     observer?.disconnect();
@@ -1854,7 +2155,13 @@
       if (pending || shouldKeepNativeView()) {
         return;
       }
-      showDashboard();
+      const preservedRouteIsCurrent = Boolean(
+        typeof preservedOverlayRoute === "string"
+        && preservedOverlayRoute
+        && typeof currentConversationLocationKey === "function"
+        && preservedOverlayRoute === currentConversationLocationKey()
+      );
+      showDashboard({ preserveNativeRoute: preservedRouteIsCurrent });
       return;
     }
     requestAnimationFrame(boot);

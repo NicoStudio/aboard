@@ -203,7 +203,7 @@ async function withOfficialCodexAppServer(operation) {
   });
   try {
     await request("initialize", {
-      clientInfo: { name: "aboard", version: "1.0.3" },
+      clientInfo: { name: "aboard", version: "1.0.4" },
       capabilities: { experimentalApi: true }
     });
     return await operation(request);
@@ -271,9 +271,16 @@ async function writerLockOwners(ids, overrides = {}) {
   if (!ids.length) return new Map();
   const run = overrides.execFileAsync || execFileAsync;
   const inspect = overrides.statFile || statFile;
+  const waitForRetry = overrides.waitForWriterLockRetry
+    || (() => new Promise(resolve => setTimeout(resolve, 40)));
   const lockDir = overrides.writerLocksDir || writerLocksDir;
   const lockPaths = ids.map(id => path.join(lockDir, `${id}.lock`));
-  const existingPaths = (await Promise.all(lockPaths.map(async lockPath => {
+  const ownersByPath = new Map(lockPaths.map(lockPath => [lockPath, new Set()]));
+  const ownerMap = () => new Map(ids.map((id, index) => [
+    id,
+    ownersByPath.get(lockPaths[index]) || new Set()
+  ]));
+  const inspectExisting = async candidates => (await Promise.all(candidates.map(async lockPath => {
     try {
       await inspect(lockPath);
       return lockPath;
@@ -282,29 +289,57 @@ async function writerLockOwners(ids, overrides = {}) {
       throw new Error("Could not safely inspect a conversation writer lock", { cause: error });
     }
   }))).filter(Boolean);
-  const ownersByPath = new Map(lockPaths.map(lockPath => [lockPath, new Set()]));
+  const classifyProbeFailure = (error, candidates) => {
+    if (Number(error?.code) !== 1 || error?.killed || error?.signal) return "unknown";
+    const stderrLines = String(error?.stderr || "").trim().split(/\r?\n/).filter(Boolean);
+    if (!stderrLines.length) return "no-match";
+    return stderrLines.every(line =>
+      line.includes("No such file or directory")
+      && candidates.some(lockPath => line.includes(lockPath))
+    ) ? "vanished" : "unknown";
+  };
+  const probeOwners = candidates => run("/usr/sbin/lsof", ["-Fpn", "--", ...candidates], {
+    timeout: 2_000,
+    maxBuffer: 1_000_000
+  });
+
+  let existingPaths = await inspectExisting(lockPaths);
   if (!existingPaths.length) {
-    return new Map(ids.map((id, index) => [id, ownersByPath.get(lockPaths[index])]));
+    return ownerMap();
   }
   let output = "";
   try {
-    ({ stdout: output } = await run("/usr/sbin/lsof", ["-Fpn", "--", ...existingPaths], {
-      timeout: 2_000,
-      maxBuffer: 1_000_000
-    }));
+    ({ stdout: output } = await probeOwners(existingPaths));
   } catch (error) {
-    const stdout = String(error?.stdout || "");
-    const stderr = String(error?.stderr || "").trim();
-    const normalNoMatch = Number(error?.code) === 1
-      && !error?.killed
-      && !error?.signal
-      && (!stderr || stderr.split(/\r?\n/).filter(Boolean).every(line =>
-        line.includes("No such file or directory") && existingPaths.some(lockPath => line.includes(lockPath))
-      ));
-    if (!normalNoMatch) {
+    const failure = classifyProbeFailure(error, existingPaths);
+    if (failure === "no-match") {
+      output = String(error?.stdout || "");
+    } else if (failure === "vanished") {
+      // A lock can be removed after stat but before lsof opens it. Recheck the
+      // exact candidates, then give surviving locks one short chance to settle
+      // before probing only those paths again.
+      existingPaths = await inspectExisting(existingPaths);
+      if (!existingPaths.length) return ownerMap();
+      await waitForRetry(40);
+      existingPaths = await inspectExisting(existingPaths);
+      if (!existingPaths.length) return ownerMap();
+      try {
+        ({ stdout: output } = await probeOwners(existingPaths));
+      } catch (retryError) {
+        const retryFailure = classifyProbeFailure(retryError, existingPaths);
+        if (retryFailure === "no-match") {
+          output = String(retryError?.stdout || "");
+        } else if (retryFailure === "vanished") {
+          const survivors = await inspectExisting(existingPaths);
+          if (!survivors.length) return ownerMap();
+          throw new Error("Could not safely determine conversation writer ownership", { cause: retryError });
+        } else {
+          throw new Error("Could not safely determine conversation writer ownership", { cause: retryError });
+        }
+      }
+    } else {
       throw new Error("Could not safely determine conversation writer ownership", { cause: error });
     }
-    output = stdout;
   }
   let currentPid = 0;
   for (const line of String(output).split(/\r?\n/)) {
@@ -315,7 +350,7 @@ async function writerLockOwners(ids, overrides = {}) {
     if (!line.startsWith("n") || !Number.isInteger(currentPid) || currentPid <= 1) continue;
     ownersByPath.get(line.slice(1))?.add(currentPid);
   }
-  return new Map(ids.map((id, index) => [id, ownersByPath.get(lockPaths[index]) || new Set()]));
+  return ownerMap();
 }
 
 async function heldWriterThreadIds(ids, overrides = {}) {
@@ -661,8 +696,30 @@ async function cdpPages(timeoutMs = 20_000) {
   return response.json();
 }
 
-async function ensureRuntime() {
-  return cdpPages(60_000);
+async function ensureRuntime(overrides = {}) {
+  const timeoutMs = overrides.timeoutMs ?? 60_000;
+  const loadPages = overrides.loadPages || (() => cdpPages(1_000));
+  const runtimeIsAlive = overrides.runtimeIsAlive || ownedRuntimeIsAlive;
+  const pause = overrides.pause || (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    if (!runtimeIsAlive()) throw new Error("Aboard runtime exited before startup completed");
+    try {
+      const pages = await loadPages();
+      const workspaceReady = Array.isArray(pages) && pages.some(page => (
+        page?.type === "page"
+        && String(page.url || "").startsWith("app://-/index.html")
+        && !String(page.url || "").includes("avatar-overlay")
+        && Boolean(page.webSocketDebuggerUrl)
+      ));
+      if (workspaceReady) return pages;
+    } catch (error) {
+      lastError = error;
+    }
+    await pause(120);
+  }
+  throw lastError || new Error("Timed out waiting for the Aboard workspace renderer");
 }
 
 async function connect(url, timeoutMs = 3_000) {
@@ -773,30 +830,64 @@ async function requestNeutralRouteOnce(pages) {
   const targets = pages.filter(page => page.type === "page"
     && page.url.startsWith("app://-/index.html")
     && !page.url.includes("avatar-overlay"));
+  let confirmed = 0;
+  let lastError = null;
   for (const target of targets) {
     try {
       const { socket, send } = await connect(target.webSocketDebuggerUrl);
       try {
-        await send("Runtime.evaluate", {
+        const response = await send("Runtime.evaluate", {
           expression: `(async () => {
-            if (window.__aboardStartupNeutralHandled) return true;
-            const deadline = Date.now() + 4_000;
+            if (window.__aboardStartupNeutralHandled === true) return true;
+            delete window.__aboardStartupNeutralHandled;
+            const deadline = Date.now() + 15_000;
+            let neutralSamples = 0;
             while (document.readyState !== "complete" && Date.now() < deadline) {
               await new Promise(resolve => setTimeout(resolve, 50));
             }
-            window.postMessage({ type: "navigate-to-route", path: "/", replace: true }, "*");
-            window.__aboardStartupNeutralHandled = true;
-            return true;
+            while (Date.now() < deadline) {
+              window.postMessage({ type: "navigate-to-route", path: "/", replace: true }, "*");
+              await new Promise(resolve => setTimeout(resolve, 160));
+              const composerValue = String(document.querySelector("[data-above-composer-conversation-id]")
+                ?.getAttribute("data-above-composer-conversation-id") || "").trim();
+              const stableComposer = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(composerValue.replace(/^local:/, ""))
+                || /^chatgpt:(?:conversation:)?[A-Za-z0-9_-]{12,}$/.test(composerValue);
+              const activePersistedRow = Boolean(document.querySelector(
+                '[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-active="true"],'
+                + '[data-app-action-sidebar-thread-row][aria-current="page"],'
+                + '[data-sidebar-chatgpt-conversation-key][aria-current="page"],'
+                + '[data-sidebar-chatgpt-conversation-key] [aria-current="page"]'
+              ));
+              const workspaceReady = Boolean(document.querySelector("aside"));
+              neutralSamples = workspaceReady && !stableComposer && !activePersistedRow
+                ? neutralSamples + 1
+                : 0;
+              if (neutralSamples >= 3) {
+                window.__aboardStartupNeutralHandled = true;
+                return true;
+              }
+            }
+            throw new Error("Aboard startup route did not reach the neutral workspace");
           })()`,
           awaitPromise: true,
           returnByValue: true
-        }, 5_000);
+        }, 16_000);
+        if (response.result?.exceptionDetails || response.result?.result?.value !== true) {
+          throw new Error(response.result?.exceptionDetails?.exception?.description
+            || response.result?.exceptionDetails?.text
+            || "Aboard could not confirm the neutral startup workspace");
+        }
+        confirmed += 1;
       } finally {
         socket.close();
       }
     } catch (error) {
+      lastError = error;
       await log(`Could not neutralize an early renderer: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+  if (!targets.length || confirmed !== targets.length) {
+    throw lastError || new Error("Aboard startup renderer was unavailable for safe neutralization");
   }
 }
 
@@ -1045,6 +1136,7 @@ if (isMainModule) {
 
 export {
   acquireHandoffBridge,
+  ensureRuntime,
   hasDefaultOfficialRuntime,
   isSupportedConversationUrl,
   loadRuntimeSnapshots,

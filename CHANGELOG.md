@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.4 — 2026-08-21
+
+- Opens Chat and Work inside the current Aboard window again instead of handing every click to a second app.
+- Keeps the mounted native conversation underneath the board overlay, so an active response continues and the same task reopens without another resume.
+- Uses the Aboard sidebar entry as the only return action; no floating return control is added.
+- Adds ordered open-attempt cancellation, route confirmation, safer writer-lock race handling, and clear cross-process conflict feedback.
+- Reliably captures newly created Chat conversations without timestamps and places them in the requested tab or project.
+- Merges native active/waiting states with local Work context progress without overwriting either source.
+
 ## 1.0.3 — 2026-08-21
 
 - Opens every Chat and Work item in the official ChatGPT/Codex client, including conversations that are already running.

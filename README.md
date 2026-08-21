@@ -7,7 +7,7 @@
 <p align="center"><strong>把散落在 ChatGPT 和 Codex 里的对话，整理成一张看板。</strong></p>
 
 <p align="center">
-  <a href="https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.3.zip"><strong>下载最新版</strong></a>
+  <a href="https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.4.zip"><strong>下载最新版</strong></a>
   ·
   <a href="https://github.com/NicoStudio/aboard/releases/latest">查看更新</a>
 </p>
@@ -45,7 +45,8 @@ Aboard 是一款 macOS 应用：左边整理 Chat，右边按项目整理 Work�
 - 把 Codex Work 按项目整理成卡片。
 - 直接拖拽会话，调整顺序或移动到其他项目。
 - 显示正在运行、等待确认和上下文使用进度。
-- 点击任意条目，直接在官方 ChatGPT/Codex 客户端定位到原会话；进行中的会话也能打开。
+- 点击任意条目，直接在当前 Aboard 窗口继续原会话；进行中的会话也能返回后再次打开。
+- Aboard 使用原来的会话，不复制正文；在 Aboard 和官方客户端看到的是同一条会话记录。
 - 隐藏敏感标题、设置优先级、置顶重要会话。
 - 自动跟随 ChatGPT/Codex 的浅色或深色主题。
 
@@ -58,7 +59,7 @@ Aboard 是一款 macOS 应用：左边整理 Chat，右边按项目整理 Work�
 
 然后：
 
-1. [下载 Aboard 安装包](https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.3.zip)。
+1. [下载 Aboard 安装包](https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.4.zip)。
 2. 双击下载的 ZIP，打开解压得到的 **Aboard** 文件夹。
 3. 双击 **Install Aboard.command**，看到“安装完成”即可。
 
@@ -70,7 +71,7 @@ Aboard 是一款 macOS 应用：左边整理 Chat，右边按项目整理 Work�
 
 1. 打开 Aboard。
 2. 从左侧会话列表把 Chat 或 Work 拖进看板。
-3. 点击会话即可在官方 ChatGPT/Codex 客户端继续；需要回到看板时，点击 Plugins 下的 Aboard。
+3. 点击会话即可在 Aboard 当前窗口继续；需要回到看板时，点击 Plugins 下的 Aboard。
 4. 需要新对话时，直接点击目标区域里的“新建”；完成后 Aboard 会把它放回正确位置。
 
 ## 更新
@@ -96,6 +97,10 @@ Aboard 会在你的 Mac 上完成本地安装和安全检查。等待出现“�
 **安装后 Codex 里还是旧版本？**
 
 完整退出并重新打开一次 ChatGPT/Codex。
+
+**为什么某个 Work 提示正在另一个 Codex 窗口中运行？**
+
+本地 Work 同一时间只能由一个客户端进程写入。Aboard 不会强行抢占，以免回复中断或重复执行；请先完整退出占用它的 ChatGPT/Codex 客户端，再回到 Aboard 打开。Aboard 自己新建或已经在 Aboard 中运行的会话，不受这个提示影响。
 
 **Aboard 会上传我的对话吗？**
 

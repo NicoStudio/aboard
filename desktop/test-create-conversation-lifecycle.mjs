@@ -127,6 +127,8 @@ function runProvisionalIdentityContract() {
   const context = vm.createContext({
     WORK_THREAD_SELECTOR: "[data-app-action-sidebar-thread-row]",
     NATIVE_ID_ALIASES_KEY: "conversation-dashboard-native-id-aliases",
+    document: { querySelector() { return null; } },
+    allThreadRows() { return []; },
     location,
     sessionStorage: {
       getItem(key) { return storage.get(key) ?? null; },
@@ -323,6 +325,7 @@ async function runReturnCancellationContract() {
     async captureCreatedConversation() { events.push("capture"); },
     samePendingCreation(left, right) { return left?.creationId === right?.creationId; },
     currentRouteConversationId() { return ""; },
+    currentRouteSurfaceKind() { return ""; },
     clearPendingCreation(value) {
       assert.equal(value.creationId, pending.creationId);
       pending = null;
@@ -337,7 +340,8 @@ async function runReturnCancellationContract() {
     filename: "inject.js#returnToDashboard"
   });
   await context.api.returnToDashboard();
-  assert.deepEqual(events, ["capture", "cancel", "board"], "returning from an unsent blank composer must cancel before showing Aboard");
+  assert.deepEqual(events, ["board", "capture", "cancel"],
+    "returning from an unsent blank composer must show Aboard immediately, then cancel the empty transaction");
   assert.equal(pending, null, "the cancelled blank composer must not block the next create action");
   assert.match(injectionSource, /function createEntry[\s\S]{0,700}returnToDashboard\(\)/,
     "the Aboard entry below Plugins must use the cancellation-aware return path");
@@ -347,6 +351,204 @@ async function runReturnCancellationContract() {
     "opening a native sidebar conversation after abandoning the composer must cancel the unanchored transaction");
   assert.match(injectionSource, /async function openNativeConversation[\s\S]{0,260}clearPendingCreation\(unfinishedCreation\)/,
     "opening an existing board item must cancel an unanchored create transaction before navigation");
+}
+
+async function runDelayedNativeRowReturnContract() {
+  const completionSource = sourceBetween(
+    injectionSource,
+    "function pendingCreationToken(value)",
+    "\n\n  async function captureCreatedConversation",
+    "delayed native row pending lifecycle"
+  );
+  const captureAndReturnSource = sourceBetween(
+    injectionSource,
+    "async function captureCreatedConversation()",
+    "\n\n  function showDashboard",
+    "delayed native row capture and return"
+  );
+  const pendingKey = "conversation-dashboard-pending-creation";
+  const oldId = "22222222-2222-4222-8222-000000720001";
+  const createdId = "22222222-2222-4222-8222-000000720002";
+  const switchedId = "22222222-2222-4222-8222-000000720003";
+  const destination = { kind: "chat", topic: "professional" };
+  const storage = new Map();
+  const posted = [];
+  const events = [];
+  let now = 1_800_000_100_000;
+  let routeId = createdId;
+  let routeKind = "chat";
+  let rows = [];
+  let releaseRows = null;
+  let waitForRows = true;
+  class TestDate extends Date {
+    static now() { return now; }
+    static parse(value) { return Date.parse(value); }
+  }
+  const createdRow = {
+    id: createdId,
+    active: true,
+    title: "",
+    payload: {
+      id: createdId,
+      title: "",
+      url: `https://chatgpt.com/c/${createdId}`,
+      hostId: "",
+      surfaceKind: "chat",
+      runtimeStatus: "active",
+      createdAt: ""
+    }
+  };
+  const context = vm.createContext({
+    URL,
+    Date: TestDate,
+    Number,
+    String,
+    SURFACE_ID: "conversation-dashboard-surface",
+    captureCreationInFlight: false,
+    pendingCreation: null,
+    pendingCreationPollTimer: 41,
+    openAttempt: 0,
+    cancelOpenAttempt() { context.openAttempt += 1; },
+    ensureThreadRowsVisible() {
+      if (!waitForRows) return Promise.resolve(rows);
+      return new Promise(resolve => { releaseRows = () => resolve(rows); });
+    },
+    allThreadRows: () => rows,
+    currentRouteConversationId: () => routeId,
+    currentRouteSurfaceKind: () => routeKind,
+    rawRowId: row => row?.id || "",
+    normalizedRowId: row => row?.id || "",
+    nativeRowActive: row => row?.active === true,
+    rememberNativeIdAlias() {},
+    nativeRowTitle: row => row?.title || "",
+    conversationCache: () => new Map(),
+    threadPayload: row => row?.payload || null,
+    document: {
+      querySelector() {
+        return { contentWindow: { postMessage(message) { posted.push(message); } } };
+      }
+    },
+    localStorage: {
+      getItem(key) { return storage.get(key) ?? null; },
+      setItem(key, value) { storage.set(key, String(value)); },
+      removeItem(key) { storage.delete(key); }
+    },
+    clearInterval() {},
+    showDashboard(options) { events.push({ type: "board", options }); },
+    startCreationTracking() { events.push({ type: "tracking" }); }
+  });
+  vm.runInContext(
+    `${completionSource}\n${captureAndReturnSource}\nglobalThis.api = { captureCreatedConversation, returnToDashboard };`,
+    context,
+    { filename: "inject.js#delayedNativeRowReturn" }
+  );
+
+  const resetPending = (creationId, beforeIds = [oldId]) => {
+    const pending = {
+      destination,
+      beforeIds,
+      startedAt: now - 100,
+      creationId,
+      threadId: null
+    };
+    context.pendingCreation = pending;
+    context.captureCreationInFlight = false;
+    storage.set(pendingKey, JSON.stringify(pending));
+    posted.length = 0;
+    events.length = 0;
+    return pending;
+  };
+
+  resetPending("synthetic-delayed-row");
+  const returning = context.api.returnToDashboard();
+  await Promise.resolve();
+  assert.deepEqual(JSON.parse(JSON.stringify(events)), [{
+    type: "board",
+    options: { preserveNativeRoute: true }
+  }], "Aboard must become visible before waiting for a delayed Recents/native row");
+  assert.equal(context.pendingCreation.threadId, null,
+    "the route-only creation must remain unanchored while row hydration is pending");
+  releaseRows();
+  await returning;
+  assert.equal(context.pendingCreation.observedThreadId, createdId,
+    "a stable new same-kind route must survive returning before its native row mounts");
+  assert.equal(context.pendingCreation.threadId, null,
+    "route-only evidence must not manufacture a complete conversation payload");
+  assert.equal(JSON.parse(storage.get(pendingKey)).observedThreadId, createdId,
+    "the delayed-row route identity must survive renderer refreshes");
+  assert.equal(events.filter(event => event.type === "tracking").length, 1,
+    "returning with a stable route must keep background placement tracking active");
+
+  waitForRows = false;
+  rows = [createdRow];
+  await context.api.captureCreatedConversation();
+  now += 500;
+  await context.api.captureCreatedConversation();
+  assert.equal(context.pendingCreation.threadId, null,
+    "a row that mounts without a real title must remain unanchored");
+  assert.equal(posted.length, 0,
+    "a titleless delayed row must not be placed on Aboard");
+  createdRow.title = "Hydrated delayed Chat title";
+  createdRow.payload.title = createdRow.title;
+  await context.api.captureCreatedConversation();
+  now += 400;
+  await context.api.captureCreatedConversation();
+  assert.equal(context.pendingCreation.threadId, createdId,
+    "the preserved route must anchor after its active row and stable title hydrate");
+  assert.deepEqual(JSON.parse(JSON.stringify(posted)), [{
+    method: "conversation-dashboard/native-created",
+    payload: createdRow.payload,
+    destination,
+    startedAt: now - 1_000,
+    creationId: "synthetic-delayed-row"
+  }], "the later mounted title must be placed into the original Aboard destination");
+
+  resetPending("synthetic-return-generation-race");
+  rows = [];
+  waitForRows = true;
+  routeId = createdId;
+  const racingReturn = context.api.returnToDashboard();
+  await Promise.resolve();
+  const replacement = {
+    destination: { kind: "chat", topic: "personal" },
+    beforeIds: [oldId],
+    startedAt: now + 10,
+    creationId: "synthetic-replacement-generation",
+    threadId: null
+  };
+  context.pendingCreation = replacement;
+  storage.set(pendingKey, JSON.stringify(replacement));
+  releaseRows();
+  await racingReturn;
+  assert.equal(context.pendingCreation.creationId, replacement.creationId,
+    "a delayed return from an older generation must not replace the current creation");
+  assert.equal(context.pendingCreation.observedThreadId, undefined,
+    "an older delayed return must not write route evidence into a replacement generation");
+  assert.equal(JSON.parse(storage.get(pendingKey)).creationId, replacement.creationId,
+    "generation safety must also hold for the persisted pending transaction");
+
+  resetPending("synthetic-return-route-switch");
+  waitForRows = true;
+  routeId = createdId;
+  const switchingReturn = context.api.returnToDashboard();
+  await Promise.resolve();
+  routeId = switchedId;
+  releaseRows();
+  await switchingReturn;
+  assert.equal(context.pendingCreation, null,
+    "a route that changes while returning must cancel instead of being captured");
+  assert.equal(storage.has(pendingKey), false,
+    "a switched route must clear the stale pending destination");
+
+  resetPending("synthetic-return-old-route", [oldId, createdId]);
+  waitForRows = false;
+  routeId = oldId;
+  rows = [];
+  await context.api.returnToDashboard();
+  assert.equal(context.pendingCreation, null,
+    "a stable route already present in beforeIds must still be rejected on return");
+  assert.equal(storage.has(pendingKey), false,
+    "rejecting an old route must release the create guard");
 }
 
 async function runConcurrentCreationGuardContract() {
@@ -586,6 +788,201 @@ async function runWaitingAndCaptureContract() {
     "a cancelled in-flight capture must not emit a late native-created message");
 }
 
+async function runMissingChatTimestampContract() {
+  const completionSource = sourceBetween(
+    injectionSource,
+    "function pendingCreationToken(value)",
+    "\n\n  async function captureCreatedConversation",
+    "missing-timestamp Chat pending lifecycle"
+  );
+  const captureSource = sourceBetween(
+    injectionSource,
+    "async function captureCreatedConversation()",
+    "\n\n  function showDashboard",
+    "missing-timestamp Chat capture"
+  );
+  const pendingKey = "conversation-dashboard-pending-creation";
+  const oldId = "22222222-2222-4222-8222-000000710001";
+  const firstId = "22222222-2222-4222-8222-000000710002";
+  const switchedId = "22222222-2222-4222-8222-000000710003";
+  const destination = { kind: "chat", topic: "personal" };
+  const storage = new Map();
+  const posted = [];
+  let now = 1_800_000_000_000;
+  class TestDate extends Date {
+    static now() { return now; }
+    static parse(value) { return Date.parse(value); }
+  }
+  const oldRow = {
+    id: oldId,
+    active: false,
+    title: "Existing cloud conversation",
+    payload: {
+      id: oldId,
+      title: "Existing cloud conversation",
+      url: `https://chatgpt.com/c/${oldId}`,
+      hostId: "",
+      surfaceKind: "chat",
+      runtimeStatus: "idle",
+      createdAt: ""
+    }
+  };
+  const createdRow = {
+    id: firstId,
+    active: true,
+    title: "Synthetic timestamp-free Chat",
+    payload: {
+      id: firstId,
+      title: "Synthetic timestamp-free Chat",
+      url: `https://chatgpt.com/c/${firstId}`,
+      hostId: "",
+      surfaceKind: "chat",
+      runtimeStatus: "active",
+      createdAt: ""
+    }
+  };
+  let routeId = firstId;
+  let routeKind = "chat";
+  let rows = [oldRow, createdRow];
+  const context = vm.createContext({
+    URL,
+    Date: TestDate,
+    Number,
+    String,
+    SURFACE_ID: "conversation-dashboard-surface",
+    captureCreationInFlight: false,
+    pendingCreation: null,
+    pendingCreationPollTimer: 29,
+    ensureThreadRowsVisible: async () => rows,
+    allThreadRows: () => rows,
+    currentRouteConversationId: () => routeId,
+    currentRouteSurfaceKind: () => routeKind,
+    rawRowId: row => row?.id || "",
+    normalizedRowId: row => row?.id || "",
+    nativeRowActive: row => row?.active === true,
+    rememberNativeIdAlias() {},
+    nativeRowTitle: row => row?.title || "",
+    conversationCache: () => new Map(),
+    threadPayload: row => row?.payload || null,
+    document: {
+      querySelector() {
+        return { contentWindow: { postMessage(message) { posted.push(message); } } };
+      }
+    },
+    localStorage: {
+      getItem(key) { return storage.get(key) ?? null; },
+      setItem(key, value) { storage.set(key, String(value)); },
+      removeItem(key) { storage.delete(key); }
+    },
+    clearInterval() {}
+  });
+  vm.runInContext(
+    `${completionSource}\n${captureSource}\nglobalThis.api = { captureCreatedConversation, clearPendingCreation };`,
+    context,
+    { filename: "inject.js#missingTimestampChatCapture" }
+  );
+
+  const resetPending = (creationId, beforeIds = [oldId]) => {
+    const pending = {
+      destination,
+      beforeIds,
+      startedAt: now - 100,
+      creationId,
+      threadId: null
+    };
+    context.pendingCreation = pending;
+    context.captureCreationInFlight = false;
+    storage.set(pendingKey, JSON.stringify(pending));
+    posted.length = 0;
+    return pending;
+  };
+
+  resetPending("synthetic-chat-without-created-at");
+  await context.api.captureCreatedConversation();
+  assert.equal(context.pendingCreation.threadId, null,
+    "one timestamp-free Chat observation must not anchor a conversation");
+  assert.equal(context.pendingCreation.observedThreadId, firstId,
+    "the first qualifying route must be remembered for a stable follow-up observation");
+  assert.equal(context.pendingCreation.observedTitle, createdRow.title,
+    "the generated title must be part of the stable observation identity");
+  await context.api.captureCreatedConversation();
+  assert.equal(context.pendingCreation.threadId, null,
+    "two immediate callbacks in one render turn must not count as route stability");
+  now += 399;
+  await context.api.captureCreatedConversation();
+  assert.equal(context.pendingCreation.threadId, null,
+    "a timestamp-free Chat route must remain stable for the full observation window");
+  now += 1;
+  await context.api.captureCreatedConversation();
+  assert.equal(context.pendingCreation.threadId, firstId,
+    "the same active titled Chat route may anchor after consecutive stable observation");
+  assert.deepEqual(JSON.parse(JSON.stringify(posted)), [{
+    method: "conversation-dashboard/native-created",
+    payload: createdRow.payload,
+    destination,
+    startedAt: now - 500,
+    creationId: "synthetic-chat-without-created-at"
+  }], "a timestamp-free Chat must return to its requested Aboard destination once safely anchored");
+
+  resetPending("synthetic-chat-placeholder-title");
+  createdRow.id = firstId;
+  createdRow.title = "";
+  Object.assign(createdRow.payload, {
+    id: firstId,
+    title: "",
+    url: `https://chatgpt.com/c/${firstId}`,
+    createdAt: ""
+  });
+  routeId = firstId;
+  await context.api.captureCreatedConversation();
+  now += 500;
+  createdRow.title = "New chat";
+  createdRow.payload.title = "New chat";
+  await context.api.captureCreatedConversation();
+  assert.equal(context.pendingCreation.threadId, null,
+    "blank and native placeholder titles must never anchor a timestamp-free Chat");
+  assert.equal(context.pendingCreation.observedAt, undefined,
+    "placeholder observations must not retain stability credit");
+  assert.equal(posted.length, 0,
+    "a placeholder Chat must not be placed on Aboard");
+
+  resetPending("synthetic-chat-route-switch");
+  createdRow.title = "First generated Chat title";
+  createdRow.payload.title = createdRow.title;
+  await context.api.captureCreatedConversation();
+  now += 500;
+  createdRow.id = switchedId;
+  createdRow.title = "Unrelated switched Chat";
+  Object.assign(createdRow.payload, {
+    id: switchedId,
+    title: createdRow.title,
+    url: `https://chatgpt.com/c/${switchedId}`
+  });
+  routeId = switchedId;
+  await context.api.captureCreatedConversation();
+  assert.equal(context.pendingCreation, null,
+    "switching to a different route must invalidate the unanchored create generation");
+  assert.equal(storage.has(pendingKey), false,
+    "a switched route must not leave a future conversation vulnerable to stale placement");
+  assert.equal(posted.length, 0,
+    "a switched route must never be imported as the requested new Chat");
+
+  resetPending("synthetic-chat-old-route", [oldId, switchedId]);
+  oldRow.active = true;
+  createdRow.active = false;
+  routeId = oldId;
+  rows = [oldRow, createdRow];
+  await context.api.captureCreatedConversation();
+  now += 500;
+  await context.api.captureCreatedConversation();
+  assert.equal(context.pendingCreation.threadId, null,
+    "an active route present in beforeIds must remain ineligible even after repeated observation");
+  assert.equal(context.pendingCreation.observedThreadId, undefined,
+    "an old route must not become the candidate identity for this creation");
+  assert.equal(posted.length, 0,
+    "an old Chat route must never be placed in the requested destination");
+}
+
 function runPlacementAndReopenContract() {
   assert.match(
     dashboardSource,
@@ -596,6 +993,7 @@ function runPlacementAndReopenContract() {
     productionFunction(dashboardSource, "threadIdFromUrl", "normalizedThreadId"),
     productionFunction(dashboardSource, "normalizedThreadId", "matchingThreadItem"),
     productionFunction(dashboardSource, "matchingThreadItem", "relativeTime"),
+    productionFunction(dashboardSource, "runtimeThreadKey", "liveRuntimeEntry"),
     productionFunction(dashboardSource, "liveRuntimeEntry", "itemProgress"),
     productionFunction(dashboardSource, "openItem", "isSupportedConversationUrl"),
     productionFunction(dashboardSource, "isSupportedConversationUrl", "sessionUrl"),
@@ -629,6 +1027,7 @@ function runPlacementAndReopenContract() {
     embeddedMode: true,
     storageKey: "conversation-dashboard-board-v1",
     liveRuntime: new Map(),
+    nativeRuntime: new Map(),
     lastOpenSignature: "",
     lastOpenAt: 0,
     modal: null,
@@ -724,7 +1123,9 @@ runKnownBaselineContract();
 runPendingExpiryContract();
 runCreationFreshnessContract();
 await runReturnCancellationContract();
+await runDelayedNativeRowReturnContract();
 await runConcurrentCreationGuardContract();
 await runWaitingAndCaptureContract();
+await runMissingChatTimestampContract();
 runPlacementAndReopenContract();
 console.log("Aboard create-conversation lifecycle verification passed.");
