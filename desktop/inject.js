@@ -3,7 +3,7 @@
 
   const ACTIVE_HANDOFF_BINDING = __ABOARD_HANDOFF_BINDING__;
   window.__conversationDashboardBindingName = ACTIVE_HANDOFF_BINDING;
-  const INJECTION_VERSION = 64;
+  const INJECTION_VERSION = 65;
   if (window.__conversationDashboardInstalled) {
     if (window.__conversationDashboardVersion === INJECTION_VERSION) return;
     window.__conversationDashboardCleanup?.();
@@ -47,7 +47,6 @@
   const SURFACE_ID = "conversation-dashboard-surface";
   const STYLE_ID = "conversation-dashboard-host-style";
   const DRAG_PREVIEW_ID = "conversation-dashboard-drag-preview";
-  const RETURN_ID = "conversation-dashboard-return";
   const NATIVE_VIEW_STATE_KEY = "conversation-dashboard-native-view";
   const NATIVE_ID_ALIASES_KEY = "conversation-dashboard-native-id-aliases";
   const PLUGINS_LABELS = new Set(["Plugins", "插件"]);
@@ -167,41 +166,6 @@
         border: 0;
         background: var(--color-background-surface, #f5f6f8);
       }
-      #${RETURN_ID} {
-        position: fixed;
-        z-index: 2147481999;
-        display: none;
-        align-items: center;
-        gap: 7px;
-        box-sizing: border-box;
-        min-width: 0;
-        height: 36px;
-        padding: 0 12px 0 10px;
-        border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-        border-radius: 12px;
-        background: color-mix(in srgb, var(--color-background-panel, #fff) 94%, transparent);
-        color: var(--color-text-foreground, #20242d);
-        box-shadow: 0 8px 24px rgba(20, 27, 45, .14);
-        font: 600 13px/1 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif;
-        cursor: pointer;
-        white-space: nowrap;
-      }
-      #${RETURN_ID}[data-visible="true"] { display: inline-flex; }
-      #${RETURN_ID}:hover { background: var(--color-background-panel, #fff); }
-      #${RETURN_ID}:focus-visible {
-        outline: 2px solid #69BFA2;
-        outline-offset: 2px;
-      }
-      #${RETURN_ID} .aboard-return-arrow {
-        display: inline-flex;
-        width: 16px;
-        height: 16px;
-        align-items: center;
-        justify-content: center;
-        font-size: 18px;
-        font-weight: 500;
-        transform: translateY(-.5px);
-      }
       ${NATIVE_THREAD_SELECTOR}:hover {
         background: var(--color-background-surface, rgba(0,0,0,.055)) !important;
         box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent);
@@ -259,12 +223,6 @@
         color: var(--color-text-foreground, #f2f4f8);
         box-shadow: 0 10px 26px rgba(0, 0, 0, .32);
       }
-      html[data-conversation-dashboard-theme="dark"] #${RETURN_ID} {
-        border-color: rgba(255, 255, 255, .14);
-        background: color-mix(in srgb, var(--color-background-panel, #242832) 94%, transparent);
-        color: var(--color-text-foreground, #f2f4f8);
-        box-shadow: 0 10px 28px rgba(0, 0, 0, .32);
-      }
       #${SURFACE_ID}[data-aboard-theme="light"],
       #${SURFACE_ID}[data-aboard-theme="light"] iframe { background: #f5f6f8; }
       @media (prefers-color-scheme: dark) {
@@ -318,48 +276,6 @@
     surface.style.top = `${Math.max(0, mainRect.top - hostRect.top)}px`;
     surface.style.width = `${mainRect.width}px`;
     surface.style.height = `${mainRect.height}px`;
-    syncReturnControlPosition(main);
-  }
-
-  function syncReturnControlPosition(main = previousMain) {
-    const control = document.getElementById(RETURN_ID);
-    if (!control || !main) return;
-    const rect = main.getBoundingClientRect();
-    control.style.left = `${Math.max(12, Math.round(rect.left + 12))}px`;
-    control.style.top = `${Math.max(12, Math.round(rect.top + 12))}px`;
-  }
-
-  function ensureReturnControl() {
-    let control = document.getElementById(RETURN_ID);
-    if (control) return control;
-    control = document.createElement("button");
-    control.id = RETURN_ID;
-    control.type = "button";
-    control.dataset.visible = "false";
-    control.setAttribute("aria-label", "返回 Aboard");
-    control.innerHTML = `<span class="aboard-return-arrow" aria-hidden="true">‹</span><span>返回 Aboard</span>`;
-    control.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-      returnToDashboard();
-    });
-    document.body.appendChild(control);
-    syncReturnControlPosition();
-    return control;
-  }
-
-  function showReturnControl() {
-    const control = ensureReturnControl();
-    control.dataset.visible = "true";
-    control.removeAttribute("aria-hidden");
-    syncReturnControlPosition();
-  }
-
-  function hideReturnControl() {
-    const control = document.getElementById(RETURN_ID);
-    if (!control) return;
-    control.dataset.visible = "false";
-    control.setAttribute("aria-hidden", "true");
   }
 
   function ensureSurface(entry) {
@@ -1441,48 +1357,6 @@
     }
   }
 
-  function internalConversationRoute(payload = {}) {
-    try {
-      const url = new URL(String(payload.url || "").trim());
-      if (url.username || url.password || url.port || url.hash) return null;
-      const decodedPath = decodeURIComponent(url.pathname).replace(/\/$/, "");
-      if (url.protocol === "codex:" && url.hostname === "threads") {
-        const id = decodedPath.match(/^\/([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/i)?.[1];
-        if (!id) return null;
-        const keys = [...url.searchParams.keys()];
-        if (keys.some(key => key !== "hostId") || url.searchParams.getAll("hostId").length > 1) return null;
-        const explicitHostId = url.searchParams.has("hostId") ? String(url.searchParams.get("hostId") || "").trim() : "";
-        if (url.searchParams.has("hostId") && !explicitHostId) return null;
-        const payloadHostId = String(payload.hostId || "").trim();
-        const hostId = explicitHostId || (payloadHostId && payloadHostId !== "local" ? payloadHostId : "");
-        return {
-          id,
-          local: true,
-          path: `/local/${encodeURIComponent(id)}${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ""}`
-        };
-      }
-      const host = url.hostname.toLowerCase();
-      if (url.protocol !== "https:" || !["chatgpt.com", "www.chatgpt.com", "chat.openai.com", "www.chat.openai.com"].includes(host)) return null;
-      if ([...url.searchParams.keys()].length) return null;
-      const id = decodedPath.match(/^\/c\/([A-Za-z0-9_-]{12,})$/)?.[1];
-      return id ? { id, local: false, path: `/work/conversation/${encodeURIComponent(id)}` } : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function isCurrentConversationRoute(route) {
-    if (!route?.path) return false;
-    try {
-      const expected = new URL(route.path, location.href);
-      const currentPath = decodeURIComponent(location.pathname).replace(/\/$/, "");
-      const expectedPath = decodeURIComponent(expected.pathname).replace(/\/$/, "");
-      return currentPath === expectedPath && location.search === expected.search;
-    } catch {
-      return false;
-    }
-  }
-
   function reportOpenError(fallback) {
     const message = lastOpenErrorMessage || fallback;
     lastOpenErrorMessage = "";
@@ -1493,50 +1367,12 @@
     lastOpenErrorMessage = "";
     const unfinishedCreation = pendingDestination();
     if (unfinishedCreation && !unfinishedCreation.threadId) clearPendingCreation(unfinishedCreation);
-    // Installed regression fixtures opt into the legacy HTTP compatibility
-    // surface so they never navigate a user's real native conversation.
-    if (window.__conversationDashboardUseHttpTestBridge === true) {
-      return handoffNativeConversation(payload);
-    }
-    const route = internalConversationRoute(payload);
-    if (!route) {
-      lastOpenErrorMessage = "原会话链接格式无效，请在设置中重新绑定";
-      return false;
-    }
-    if (isCurrentConversationRoute(route)) {
-      rememberNativeView("current-conversation");
-      hideDashboard();
-      showReturnControl();
-      return true;
-    }
-    if (route.local) {
-      const request = callHostBridgeResult("thread-availability", { id: route.id }, 6_000);
-      if (!request) {
-        lastOpenErrorMessage = "Aboard 暂时无法确认会话状态，请重试";
-        return false;
-      }
-      const result = await request;
-      if (!result?.ok) {
-        lastOpenErrorMessage = "Aboard 暂时无法确认会话状态，请重试";
-        return false;
-      }
-      const availability = result.value;
-      const safeIdle = availability?.claimed === false && availability?.ownership === "none";
-      const safeSelf = availability?.claimed === true && availability?.ownership === "self";
-      if (!safeIdle && !safeSelf) {
-        lastOpenErrorMessage = availability?.claimed === true && availability?.ownership === "other"
-          ? "该本地会话正在另一个 Codex 窗口中使用；为避免冲突，请先结束或切换该会话后再打开"
-          : "Aboard 暂时无法确认会话状态，请重试";
-        return false;
-      }
-    }
-    rememberNativeView("open-conversation");
-    hideDashboard();
-    showReturnControl();
-    const testSink = window.__conversationDashboardRouteTestSink;
-    if (typeof testSink === "function") testSink(route.path);
-    else window.postMessage({ type: "navigate-to-route", path: route.path }, "*");
-    return true;
+    // Aboard is an index, not a second conversation runtime. Every board item
+    // is handed to the official ChatGPT/Codex client, including conversations
+    // that are already running there. The board itself stays available.
+    const opened = await handoffNativeConversation(payload);
+    if (!opened) lastOpenErrorMessage = "无法在 ChatGPT/Codex 中打开该会话，请重试";
+    return opened;
   }
 
   async function createNativeConversation(rawDestination) {
@@ -1554,7 +1390,6 @@
       const beforeIds = [...currentKnownThreadIds()];
       rememberNativeView("create-conversation");
       hideDashboard();
-      showReturnControl();
 
       if (!await ensureChatGPTMode()) {
         showDashboard();
@@ -1826,7 +1661,6 @@
       if (!startupNeutralHandled) requestNeutralHostRoute();
     }
     const firstActivation = !active;
-    hideReturnControl();
     active = true;
     syncSurfaceBounds(surface, previousMain);
     surface.dataset.active = "true";
@@ -1882,13 +1716,6 @@
   }
 
   document.addEventListener("click", event => {
-    const returnControl = event.target.closest?.(`#${RETURN_ID}`);
-    if (returnControl) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      returnToDashboard();
-      return;
-    }
     const entry = event.target.closest?.(`#${ENTRY_ID}`);
     if (entry) {
       event.preventDefault();
@@ -1921,7 +1748,6 @@
     if (sidebarButton) {
       rememberNativeView("sidebar");
       hideDashboard();
-      showReturnControl();
     }
   }, { capture: true, signal: listenerController.signal });
 
@@ -2014,7 +1840,6 @@
     domStartupFrame = null;
     childPointerController?.abort();
     childPointerController = null;
-    document.getElementById(RETURN_ID)?.remove();
     const root = document.documentElement;
     if (root) {
       delete root.dataset.conversationDashboardActive;
@@ -2027,7 +1852,6 @@
       const pending = pendingDestination();
       if (pending) startCreationTracking();
       if (pending || shouldKeepNativeView()) {
-        showReturnControl();
         return;
       }
       showDashboard();

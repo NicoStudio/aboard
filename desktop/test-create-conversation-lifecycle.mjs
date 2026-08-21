@@ -47,7 +47,6 @@ function runBootContract() {
       shouldKeepNativeView: () => keepNativeView,
       startCreationTracking: () => events.push("tracking"),
       hideDashboard: () => events.push("hidden"),
-      showReturnControl: () => events.push("return-control"),
       showDashboard: () => events.push("shown"),
       requestAnimationFrame: () => events.push("retry")
     });
@@ -80,8 +79,8 @@ function runBootContract() {
 
   assert.deepEqual(
     run(null, true),
-    ["return-control"],
-    "after board acknowledgement, a renderer refresh must remain on the native conversation until the user returns"
+    [],
+    "after board acknowledgement, a renderer refresh must remain on the native conversation until the user opens Aboard from Plugins"
   );
 }
 
@@ -340,8 +339,10 @@ async function runReturnCancellationContract() {
   await context.api.returnToDashboard();
   assert.deepEqual(events, ["capture", "cancel", "board"], "returning from an unsent blank composer must cancel before showing Aboard");
   assert.equal(pending, null, "the cancelled blank composer must not block the next create action");
-  assert.match(injectionSource, /returnControl[\s\S]{0,180}returnToDashboard\(\)/,
-    "the delegated left return control must use the cancellation-aware return path");
+  assert.match(injectionSource, /function createEntry[\s\S]{0,700}returnToDashboard\(\)/,
+    "the Aboard entry below Plugins must use the cancellation-aware return path");
+  assert.doesNotMatch(injectionSource, /const RETURN_ID|showReturnControl|hideReturnControl/,
+    "Aboard must not add a second floating return control");
   assert.match(injectionSource, /if \(!active\) \{[\s\S]{0,260}nativeRow[\s\S]{0,160}clearPendingCreation\(unfinishedCreation\)/,
     "opening a native sidebar conversation after abandoning the composer must cancel the unanchored transaction");
   assert.match(injectionSource, /async function openNativeConversation[\s\S]{0,260}clearPendingCreation\(unfinishedCreation\)/,
@@ -366,7 +367,6 @@ async function runConcurrentCreationGuardContract() {
     currentKnownThreadIds() { return new Set(); },
     rememberNativeView() {},
     hideDashboard() {},
-    showReturnControl() {},
     async ensureChatGPTMode() { return false; },
     showDashboard() {}
   });

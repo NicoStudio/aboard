@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3 — 2026-08-21
+
+- Opens every Chat and Work item in the official ChatGPT/Codex client, including conversations that are already running.
+- Removes the in-window conversation route and floating return control; reopen the board from Aboard below Plugins.
+- Keeps the board available while handing off and allows the same running conversation to be opened again later.
+- Adds simple public screenshots for Chat labels, privacy, priority, project movement and live progress.
+
 ## 1.0.2 — 2026-08-21
 
 - Preloads the native Recents virtual list once when Aboard opens, so cached conversations appear immediately instead of mounting a few rows at a time.

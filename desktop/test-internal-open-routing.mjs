@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-// Installed black-box regression for Aboard's in-window conversation routing.
-// It uses synthetic conversation IDs and a mocked CDP binding, so it never
-// opens or mutates a real native conversation.
+// Installed black-box regression for Aboard's direct-open contract. Every
+// board item must be handed to the official client, even when it is already
+// running. The synthetic CDP binding prevents any real conversation opening.
 
 const cdpPort = Number(process.env.CONVERSATION_DASHBOARD_CDP_PORT || 9237);
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -69,39 +69,37 @@ const evaluation = await send("Runtime.evaluate", {
     if (!await waitFor(() => surface.dataset.active === "true")) return { ok: false, reason: "Aboard did not open" };
 
     const originalStorage = localStorage.getItem(storageKey);
-    const originalBindingName = window.__conversationDashboardBindingName;
-    const originalBindingDescriptor = Object.getOwnPropertyDescriptor(window, originalBindingName);
+    const bindingName = window.__conversationDashboardBindingName;
+    const originalBindingDescriptor = Object.getOwnPropertyDescriptor(window, bindingName);
     const originalHttpDescriptor = Object.getOwnPropertyDescriptor(window, "__conversationDashboardUseHttpTestBridge");
     const originalRouteSinkDescriptor = Object.getOwnPropertyDescriptor(window, "__conversationDashboardRouteTestSink");
     const calls = [];
     const routeMessages = [];
     const ids = {
-      work: "11111111-1111-4111-8111-000000600101",
-      claimed: "11111111-1111-4111-8111-000000600102",
-      remote: "11111111-1111-4111-8111-000000600103",
-      chat: "22222222-2222-4222-8222-000000600104",
-      self: "11111111-1111-4111-8111-000000600105"
+      idle: "11111111-1111-4111-8111-000000650101",
+      active: "11111111-1111-4111-8111-000000650102",
+      chat: "22222222-2222-4222-8222-000000650103",
+      hidden: "22222222-2222-4222-8222-000000650104"
     };
     const fixture = {
       version: 2,
       defaultTab: "personal",
       chatSortBy: { professional: "manual", personal: "manual" },
-      projects: [{ id: "inside-project", name: "Inside Aboard", accent: "#0B4F43", order: 1, sortBy: "manual" }],
+      projects: [{ id: "direct-project", name: "Direct open", accent: "#0B4F43", order: 1, sortBy: "manual" }],
       items: [
-        { id: "inside-work", title: "Inside Work", kind: "work", topic: null, projectId: "inside-project", pinned: false, titleHidden: false, marker: "p2", runtimeStatus: "idle", createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z", manualOrder: 1, hostId: "local", url: "codex://threads/" + ids.work },
-        { id: "inside-claimed", title: "Claimed Work", kind: "work", topic: null, projectId: "inside-project", pinned: false, titleHidden: false, marker: "p2", runtimeStatus: "active", createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z", manualOrder: 2, hostId: "local", url: "codex://threads/" + ids.claimed },
-        { id: "inside-self", title: "Aboard-owned Work", kind: "work", topic: null, projectId: "inside-project", pinned: false, titleHidden: false, marker: "p2", runtimeStatus: "active", createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z", manualOrder: 3, hostId: "local", url: "codex://threads/" + ids.self },
-        { id: "inside-remote", title: "Remote Work", kind: "work", topic: null, projectId: "inside-project", pinned: false, titleHidden: false, marker: "p2", runtimeStatus: "idle", createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z", manualOrder: 4, hostId: "remote:qa east/1", url: "codex://threads/" + ids.remote + "?hostId=remote%3Aqa%20east%2F1" },
-        { id: "inside-chat", title: "Inside Chat", kind: "chat", topic: "personal", projectId: null, pinned: false, titleHidden: false, marker: "p2", runtimeStatus: "idle", createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z", manualOrder: 1, hostId: "", url: "https://chatgpt.com/c/" + ids.chat }
+        { id: "idle-work", title: "Idle Work", kind: "work", topic: null, projectId: "direct-project", pinned: false, titleHidden: false, marker: "p2", runtimeStatus: "idle", createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z", manualOrder: 1, hostId: "local", url: "codex://threads/" + ids.idle },
+        { id: "active-work", title: "Active Work", kind: "work", topic: null, projectId: "direct-project", pinned: false, titleHidden: false, marker: "p1", runtimeStatus: "active", progress: 58, createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z", manualOrder: 2, hostId: "local", url: "codex://threads/" + ids.active },
+        { id: "active-chat", title: "Active Chat", kind: "chat", topic: "personal", projectId: null, pinned: false, titleHidden: false, marker: "p2", runtimeStatus: "active", createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z", manualOrder: 1, hostId: "", url: "https://chatgpt.com/c/" + ids.chat },
+        { id: "hidden-chat", title: "Synthetic private title", kind: "chat", topic: "personal", projectId: null, pinned: false, titleHidden: true, marker: "p2", runtimeStatus: "idle", createdAt: "2026-08-20T00:00:00.000Z", updatedAt: "2026-08-20T00:00:00.000Z", manualOrder: 2, hostId: "", url: "https://chatgpt.com/c/" + ids.hidden }
       ]
     };
     const currentFrame = async () => waitFor(() => {
       const frame = document.querySelector("#conversation-dashboard-surface iframe");
       const child = frame?.contentWindow;
       try {
-        if (!child || !child.eval("typeof openItem === 'function' && typeof render === 'function'")) return null;
+        if (!child || !child.eval("typeof render === 'function'")) return null;
       } catch (_) { return null; }
-      return { frame, child, doc: frame.contentDocument };
+      return { child, doc: frame.contentDocument };
     });
     const installFixture = async () => {
       const live = await currentFrame();
@@ -113,24 +111,10 @@ const evaluation = await send("Runtime.evaluate", {
     const clickItem = async itemId => {
       const live = await currentFrame();
       const opener = live?.doc?.querySelector('[data-open="' + itemId + '"]');
-      if (!opener) throw new Error("Missing board opener " + itemId);
+      if (!opener) throw new Error("Missing synthetic board opener");
       opener.click();
     };
-    const returnToBoard = async () => {
-      const control = await waitFor(() => document.getElementById("conversation-dashboard-return")?.dataset.visible === "true"
-        ? document.getElementById("conversation-dashboard-return") : null);
-      if (!control) throw new Error("Return to Aboard control was not shown");
-      control.click();
-      if (!await waitFor(() => document.getElementById("conversation-dashboard-surface")?.dataset.active === "true"
-        && (location.pathname === "/" || location.pathname === "/index.html"))) {
-        throw new Error("Return to Aboard did not restore the board");
-      }
-      // The host router handles navigate-to-route asynchronously even though
-      // the dashboard overlay becomes visible immediately. Let that neutral
-      // route settle before the next synthetic conversation is opened.
-      await sleep(350);
-      return control;
-    };
+    const handoffs = () => calls.filter(call => call.method === "handoff");
 
     const results = {};
     try {
@@ -138,106 +122,42 @@ const evaluation = await send("Runtime.evaluate", {
         configurable: true, writable: true, value: false
       });
       Object.defineProperty(window, "__conversationDashboardRouteTestSink", {
-        configurable: true,
-        writable: true,
-        value: path => routeMessages.push({ path: String(path || ""), replace: false })
+        configurable: true, writable: true, value: path => routeMessages.push(String(path || ""))
       });
-      Object.defineProperty(window, originalBindingName, {
+      Object.defineProperty(window, bindingName, {
         configurable: true,
         writable: true,
         value: raw => {
           const request = JSON.parse(String(raw || "{}"));
           calls.push(request);
-          const id = String(request?.payload?.id || "");
-          queueMicrotask(() => window.__conversationDashboardResolveBridge(request.requestId, {
-            ok: true,
-            value: {
-              id,
-              claimed: id === ids.claimed || id === ids.self,
-              ownership: id === ids.self ? "self" : id === ids.claimed ? "other" : "none"
-            }
-          }));
+          queueMicrotask(() => window.__conversationDashboardResolveBridge(request.requestId, { ok: true, value: true }));
         }
       });
 
       await installFixture();
-      const routesBeforeWork = routeMessages.length;
-      await clickItem("inside-work");
-      const workOpened = await waitFor(() => surface.dataset.active === "false"
-        && document.getElementById("conversation-dashboard-return")?.dataset.visible === "true");
-      const workRoute = await waitFor(() => routeMessages.slice(routesBeforeWork).find(message => message.path.startsWith("/local/"))?.path);
-      const workReturn = await returnToBoard();
-      results.work = {
-        openedInside: Boolean(workOpened),
-        exactRoute: workRoute === "/local/" + ids.work,
-        route: workRoute,
-        availabilityCheckedOnce: calls.filter(call => call.method === "thread-availability" && call.payload?.id === ids.work).length === 1,
-        returnControlAccessible: workReturn.getAttribute("aria-label") === "返回 Aboard",
-        boardRestored: surface.dataset.active === "true"
-      };
+      await clickItem("idle-work");
+      await waitFor(() => handoffs().some(call => call.payload?.id === ids.idle));
+      await clickItem("active-work");
+      await waitFor(() => handoffs().some(call => call.payload?.id === ids.active));
+      await clickItem("active-chat");
+      await waitFor(() => handoffs().some(call => call.payload?.id === ids.chat));
+      await clickItem("hidden-chat");
+      await waitFor(() => handoffs().some(call => call.payload?.id === ids.hidden));
 
-      await installFixture();
-      const routesBeforeRemote = routeMessages.length;
-      await clickItem("inside-remote");
-      const remoteOpened = await waitFor(() => surface.dataset.active === "false"
-        && document.getElementById("conversation-dashboard-return")?.dataset.visible === "true");
-      const remoteRoute = await waitFor(() => routeMessages.slice(routesBeforeRemote).find(message => message.path.startsWith("/local/"))?.path);
-      await returnToBoard();
-      results.remote = {
-        openedInside: Boolean(remoteOpened),
-        exactRoute: remoteRoute === "/local/" + ids.remote + "?hostId=remote%3Aqa%20east%2F1",
-        route: remoteRoute,
-        availabilityCheckedOnce: calls.filter(call => call.method === "thread-availability" && call.payload?.id === ids.remote).length === 1
-      };
+      const activeFirstCount = handoffs().filter(call => call.payload?.id === ids.active).length;
+      await sleep(950);
+      await clickItem("active-work");
+      await waitFor(() => handoffs().filter(call => call.payload?.id === ids.active).length === activeFirstCount + 1);
 
-      await installFixture();
-      const availabilityCallsBeforeChat = calls.filter(call => call.method === "thread-availability").length;
-      const routesBeforeChat = routeMessages.length;
-      await clickItem("inside-chat");
-      const chatOpened = await waitFor(() => surface.dataset.active === "false"
-        && document.getElementById("conversation-dashboard-return")?.dataset.visible === "true");
-      const chatRoute = await waitFor(() => routeMessages.slice(routesBeforeChat).find(message => message.path.startsWith("/work/conversation/"))?.path);
-      await returnToBoard();
-      results.chat = {
-        openedInside: Boolean(chatOpened),
-        exactRoute: chatRoute === "/work/conversation/" + ids.chat,
-        route: chatRoute,
-        skippedWriterProbe: calls.filter(call => call.method === "thread-availability").length === availabilityCallsBeforeChat,
-        boardRestored: surface.dataset.active === "true"
-      };
-
-      await installFixture();
-      const routesBeforeSelf = routeMessages.length;
-      await clickItem("inside-self");
-      const selfOpened = await waitFor(() => surface.dataset.active === "false"
-        && document.getElementById("conversation-dashboard-return")?.dataset.visible === "true");
-      const selfRoute = await waitFor(() => routeMessages.slice(routesBeforeSelf).find(message => message.path.startsWith("/local/"))?.path);
-      await returnToBoard();
-      results.selfOwned = {
-        openedInside: Boolean(selfOpened),
-        exactRoute: selfRoute === "/local/" + ids.self,
-        availabilityCheckedOnce: calls.filter(call => call.method === "thread-availability" && call.payload?.id === ids.self).length === 1
-      };
-
-      const live = await installFixture();
-      const beforeClaimedPath = location.pathname + location.search;
-      await clickItem("inside-claimed");
-      const conflictToast = await waitFor(() => {
-        const toast = live.doc.getElementById("toast");
-        return toast?.classList.contains("show") && toast.textContent.includes("另一个 Codex 窗口") ? toast.textContent : "";
-      });
-      results.claimed = {
-        stayedOnBoard: surface.dataset.active === "true",
-        routeUnchanged: location.pathname + location.search === beforeClaimedPath,
-        clearMessage: Boolean(conflictToast),
-        returnHidden: document.getElementById("conversation-dashboard-return")?.dataset.visible !== "true",
-        availabilityCheckedOnce: calls.filter(call => call.method === "thread-availability" && call.payload?.id === ids.claimed).length === 1
-      };
-      results.noExternalHandoff = calls.every(call => call.method !== "handoff" && call.method !== "rename");
+      results.allKindsHandedOff = [ids.idle, ids.active, ids.chat, ids.hidden]
+        .every(id => handoffs().some(call => call.payload?.id === id));
+      results.activeConversationReopens = handoffs().filter(call => call.payload?.id === ids.active).length === 2;
+      results.boardStaysAvailable = surface.dataset.active === "true";
+      results.noInternalRoute = routeMessages.length === 0;
+      results.noWriterGate = calls.every(call => call.method !== "thread-availability");
+      results.noFloatingReturn = !document.getElementById("conversation-dashboard-return");
+      results.hiddenTitleProtected = handoffs().find(call => call.payload?.id === ids.hidden)?.payload?.title === "";
     } finally {
-      document.getElementById("conversation-dashboard-return")?.click();
-      await waitFor(() => (location.pathname === "/" || location.pathname === "/index.html")
-        && document.getElementById("conversation-dashboard-surface")?.dataset.active === "true");
       if (originalStorage === null) localStorage.removeItem(storageKey);
       else localStorage.setItem(storageKey, originalStorage);
       const live = await currentFrame();
@@ -247,8 +167,8 @@ const evaluation = await send("Runtime.evaluate", {
           : "JSON.parse(" + JSON.stringify(originalStorage) + ")";
         live.child.eval("clearTimeout(saveTimer); saveTimer = null; board = normalizeBoard(" + originalBoardExpression + "); modal = null; floatingMenu = null; render()");
       }
-      if (originalBindingDescriptor) Object.defineProperty(window, originalBindingName, originalBindingDescriptor);
-      else delete window[originalBindingName];
+      if (originalBindingDescriptor) Object.defineProperty(window, bindingName, originalBindingDescriptor);
+      else delete window[bindingName];
       if (originalRouteSinkDescriptor) Object.defineProperty(window, "__conversationDashboardRouteTestSink", originalRouteSinkDescriptor);
       else delete window.__conversationDashboardRouteTestSink;
       if (originalHttpDescriptor) Object.defineProperty(window, "__conversationDashboardUseHttpTestBridge", originalHttpDescriptor);
@@ -257,12 +177,8 @@ const evaluation = await send("Runtime.evaluate", {
       if (originalStorage === null) localStorage.removeItem(storageKey);
       else localStorage.setItem(storageKey, originalStorage);
     }
-    results.restored = {
-      storageExact: localStorage.getItem(storageKey) === originalStorage,
-      boardVisible: document.getElementById("conversation-dashboard-surface")?.dataset.active === "true",
-      returnHidden: document.getElementById("conversation-dashboard-return")?.dataset.visible !== "true"
-    };
-    return { ok: Object.values(results).every(value => typeof value === "boolean" ? value : Object.values(value).every(Boolean)), results };
+    results.storageExact = localStorage.getItem(storageKey) === originalStorage;
+    return { ok: Object.values(results).every(Boolean), results };
   })()`,
   awaitPromise: true,
   returnByValue: true
@@ -271,7 +187,7 @@ const evaluation = await send("Runtime.evaluate", {
 try { socket.close(); } catch {}
 const exception = evaluation?.result?.exceptionDetails;
 const result = exception
-  ? { ok: false, error: exception.exception?.description || exception.text || "Internal routing evaluation failed" }
+  ? { ok: false, error: exception.exception?.description || exception.text || "Direct-open evaluation failed" }
   : evaluation?.result?.result?.value;
 console.log(JSON.stringify(result, null, 2));
 if (!result?.ok) process.exitCode = 1;

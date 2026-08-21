@@ -7,7 +7,7 @@
 <p align="center"><strong>把散落在 ChatGPT 和 Codex 里的对话，整理成一张看板。</strong></p>
 
 <p align="center">
-  <a href="https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.2.zip"><strong>下载最新版</strong></a>
+  <a href="https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.3.zip"><strong>下载最新版</strong></a>
   ·
   <a href="https://github.com/NicoStudio/aboard/releases/latest">查看更新</a>
 </p>
@@ -16,13 +16,36 @@ Aboard 是一款 macOS 应用：左边整理 Chat，右边按项目整理 Work�
 
 ![Aboard demo with synthetic conversations](docs/aboard-demo.png)
 
-## 它能做什么？
+## 看图就会用
+
+### Chat 拖到需要的标签
+
+<img src="docs/chat-categories-demo.png" width="360" alt="把 Chat 拖到专业会话或个人会话标签下">
+
+把左侧的 Chat 直接拖到“专业会话”或“个人会话”。每条会话右侧还可以：
+
+- 点击眼睛，隐藏或重新显示名称。
+- 点击星标，把重要会话置顶。
+- 点击彩色圆点，设置优先级。
+
+### Work 和项目卡片都能移动
+
+![拖动 Work、调整项目卡片位置并查看进度](docs/project-progress-demo.png)
+
+- 把 Work 拖进任意项目，也可以在项目之间移动。
+- 拖动整张项目卡片，调整它所在的栏位和先后顺序；卡片会自动紧凑排列。
+- 正在运行的 Work 会显示状态、百分比和背景进度，不用打开会话也能看到进展。
+- 等待你确认或输入时，Aboard 会直接在条目上提醒。
+
+> 截图中的项目和会话全部是虚构演示数据，不会随安装包进入你的看板。
+
+## 主要功能
 
 - 把 Chat 分成“专业会话”和“个人会话”。
 - 把 Codex Work 按项目整理成卡片。
 - 直接拖拽会话，调整顺序或移动到其他项目。
 - 显示正在运行、等待确认和上下文使用进度。
-- 点击条目进入原会话，再从左上角返回看板。
+- 点击任意条目，直接在官方 ChatGPT/Codex 客户端定位到原会话；进行中的会话也能打开。
 - 隐藏敏感标题、设置优先级、置顶重要会话。
 - 自动跟随 ChatGPT/Codex 的浅色或深色主题。
 
@@ -35,7 +58,7 @@ Aboard 是一款 macOS 应用：左边整理 Chat，右边按项目整理 Work�
 
 然后：
 
-1. [下载 Aboard 安装包](https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.2.zip)。
+1. [下载 Aboard 安装包](https://github.com/NicoStudio/aboard/releases/latest/download/Aboard-macOS-1.0.3.zip)。
 2. 双击下载的 ZIP，打开解压得到的 **Aboard** 文件夹。
 3. 双击 **Install Aboard.command**，看到“安装完成”即可。
 
@@ -47,7 +70,7 @@ Aboard 是一款 macOS 应用：左边整理 Chat，右边按项目整理 Work�
 
 1. 打开 Aboard。
 2. 从左侧会话列表把 Chat 或 Work 拖进看板。
-3. 点击会话即可继续原来的对话。
+3. 点击会话即可在官方 ChatGPT/Codex 客户端继续；需要回到看板时，点击 Plugins 下的 Aboard。
 4. 需要新对话时，直接点击目标区域里的“新建”；完成后 Aboard 会把它放回正确位置。
 
 ## 更新

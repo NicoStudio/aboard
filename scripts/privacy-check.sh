@@ -36,6 +36,8 @@ allowed_binary_images = {
     "assets/Aboard.png",
     "assets/aboard-app-icon.png",
     "docs/aboard-demo.png",
+    "docs/chat-categories-demo.png",
+    "docs/project-progress-demo.png",
 }
 blocked_parts = {"outputs", "dist", "coverage", ".cache"}
 blocked_names = {

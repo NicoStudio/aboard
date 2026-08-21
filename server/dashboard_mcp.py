@@ -298,7 +298,7 @@ def handle(request):
                 "tools": {"listChanged": False},
                 "resources": {"subscribe": False, "listChanged": False},
             },
-            "serverInfo": {"name": "conversation-dashboard", "version": "1.0.2"},
+            "serverInfo": {"name": "conversation-dashboard", "version": "1.0.3"},
             "instructions": "Use open_dashboard whenever the user asks to view Aboard.",
         }
     if method == "ping":
